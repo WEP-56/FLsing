@@ -2,7 +2,10 @@ package com.flsing.flsing
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.provider.OpenableColumns
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -12,9 +15,20 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     companion object {
         private const val FILE_PICKER_REQUEST_CODE = 4102
+        private const val UPDATE_CHANNEL = "flsing/app_update"
     }
 
     private var pendingFileResult: MethodChannel.Result? = null
+    private var pendingApk: File? = null
+
+    override fun onResume() {
+        super.onResume()
+        val apk = pendingApk ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+            pendingApk = null
+            launchInstaller(apk)
+        }
+    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -56,6 +70,46 @@ class MainActivity : FlutterActivity() {
                     FILE_PICKER_REQUEST_CODE,
                 )
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATE_CHANNEL)
+            .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
+                if (call.method != "installApk") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val path = call.arguments as? String
+                val apk = path?.let(::File)
+                if (apk == null || !apk.isFile) {
+                    result.error("APK_NOT_FOUND", "找不到已下载的安装包", null)
+                    return@setMethodCallHandler
+                }
+                runCatching { requestInstall(apk) }
+                    .onSuccess { result.success(null) }
+                    .onFailure { result.error("INSTALL_FAILED", it.message, null) }
+            }
+    }
+
+    private fun requestInstall(apk: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            pendingApk = apk
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:$packageName"),
+                ),
+            )
+            return
+        }
+        launchInstaller(apk)
+    }
+
+    private fun launchInstaller(apk: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+        )
     }
 
     private fun copyToPrivateStorage(uriString: String): String {

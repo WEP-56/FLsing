@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/app_messenger.dart';
 import '../../core/theme/flsing_theme.dart';
 import '../../data/services/app_settings.dart';
+import '../../data/services/app_update_service.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_state.dart';
 import '../../providers/theme_provider.dart';
@@ -18,6 +19,8 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _updatingRuleSets = false;
+  final _updateService = AppUpdateService();
+  late final Future<String> _appVersion = _updateService.currentVersion();
 
   @override
   Widget build(BuildContext context) {
@@ -118,10 +121,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 settings.testUrl,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: c.text4,
-                                  fontSize: 13,
-                                ),
+                                style: TextStyle(color: c.text4, fontSize: 13),
                               ),
                               trailing: Icon(
                                 Icons.edit_outlined,
@@ -217,11 +217,15 @@ class _SettingsPageState extends State<SettingsPage> {
                           ],
                         ),
                         const _SectionHeader('关于'),
-                        const _SettingsGroup(
+                        _SettingsGroup(
                           children: [
-                            _InfoTile(label: '应用', value: 'FLsing'),
-                            _InfoTile(label: '版本', value: '1.0.0'),
-                            _InfoTile(label: '许可', value: 'MIT'),
+                            const _InfoTile(label: '应用', value: 'FLsing'),
+                            _InfoTile(
+                              label: '版本',
+                              future: _appVersion,
+                              onTap: _checkForUpdates,
+                            ),
+                            const _InfoTile(label: '许可', value: 'MIT'),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -251,6 +255,12 @@ class _SettingsPageState extends State<SettingsPage> {
     if (message != null) showAppMessage(message);
     if (mounted) setState(() => _updatingRuleSets = false);
   }
+
+  Future<void> _checkForUpdates() => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _UpdateDialog(service: _updateService),
+  );
 
   Future<void> _editTestUrl(AppSettings settings) async {
     final controller = TextEditingController(text: settings.testUrl);
@@ -283,8 +293,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
-                  onPressed: () =>
-                      controller.text = AppSettings.defaultTestUrl,
+                  onPressed: () => controller.text = AppSettings.defaultTestUrl,
                   child: const Text('恢复默认'),
                 ),
               ),
@@ -477,23 +486,173 @@ class _PlaceholderTile extends StatelessWidget {
 }
 
 class _InfoTile extends StatelessWidget {
-  const _InfoTile({required this.label, this.value, this.future});
+  const _InfoTile({required this.label, this.value, this.future, this.onTap});
   final String label;
   final String? value;
   final Future<String>? future;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final style = TextStyle(color: FlsingColors.of(context).text4);
+    final valueWidget = future != null
+        ? FutureBuilder<String>(
+            future: future,
+            builder: (_, snapshot) => Text(snapshot.data ?? '…', style: style),
+          )
+        : Text(value ?? '', style: style);
     return ListTile(
       title: Text(label),
-      trailing: future != null
-          ? FutureBuilder<String>(
-              future: future,
-              builder: (_, snapshot) =>
-                  Text(snapshot.data ?? '…', style: style),
-            )
-          : Text(value ?? '', style: style),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          valueWidget,
+          if (onTap != null) ...[
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, size: 18, color: style.color),
+          ],
+        ],
+      ),
+      onTap: onTap,
     );
+  }
+}
+
+enum _UpdatePhase { checking, downloading, upToDate, installing, failed }
+
+class _UpdateDialog extends StatefulWidget {
+  const _UpdateDialog({required this.service});
+
+  final AppUpdateService service;
+
+  @override
+  State<_UpdateDialog> createState() => _UpdateDialogState();
+}
+
+class _UpdateDialogState extends State<_UpdateDialog> {
+  _UpdatePhase _phase = _UpdatePhase.checking;
+  UpdateRelease? _release;
+  String? _error;
+  int _received = 0;
+  int? _total;
+
+  bool get _busy =>
+      _phase == _UpdatePhase.checking || _phase == _UpdatePhase.downloading;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    setState(() {
+      _phase = _UpdatePhase.checking;
+      _error = null;
+      _received = 0;
+      _total = null;
+    });
+    try {
+      final result = await widget.service.checkForUpdate();
+      if (!mounted) return;
+      _release = result.release;
+      if (!result.hasUpdate) {
+        setState(() => _phase = _UpdatePhase.upToDate);
+        return;
+      }
+
+      setState(() => _phase = _UpdatePhase.downloading);
+      final apk = await widget.service.downloadApk(
+        result.release,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            _received = received;
+            _total = total;
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() => _phase = _UpdatePhase.installing);
+      await widget.service.installApk(apk);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _UpdatePhase.failed;
+        _error = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _total != null && _total! > 0
+        ? (_received / _total!).clamp(0.0, 1.0)
+        : null;
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        title: Text(_title),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_message),
+              if (_busy) ...[
+                const SizedBox(height: 18),
+                LinearProgressIndicator(
+                  value: _phase == _UpdatePhase.downloading ? progress : null,
+                ),
+              ],
+              if (_phase == _UpdatePhase.downloading) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _downloadProgress,
+                  style: TextStyle(
+                    color: FlsingColors.of(context).text4,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: _busy
+            ? null
+            : [
+                if (_phase == _UpdatePhase.failed)
+                  TextButton(onPressed: _run, child: const Text('重试')),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('关闭'),
+                ),
+              ],
+      ),
+    );
+  }
+
+  String get _title => switch (_phase) {
+    _UpdatePhase.checking => '检查更新',
+    _UpdatePhase.downloading => '正在下载更新',
+    _UpdatePhase.upToDate => '已是最新版本',
+    _UpdatePhase.installing => '准备安装',
+    _UpdatePhase.failed => '更新失败',
+  };
+
+  String get _message => switch (_phase) {
+    _UpdatePhase.checking => '正在从 GitHub 获取最新版本…',
+    _UpdatePhase.downloading => '发现 v${_release?.version}，正在下载安装包。',
+    _UpdatePhase.upToDate => '当前版本已经是 GitHub 上的最新版本。',
+    _UpdatePhase.installing => '安装包已下载，已唤起系统安装器。',
+    _UpdatePhase.failed => _error ?? '发生未知错误',
+  };
+
+  String get _downloadProgress {
+    final received = (_received / 1024 / 1024).toStringAsFixed(1);
+    if (_total == null || _total == 0) return '$received MB';
+    final total = (_total! / 1024 / 1024).toStringAsFixed(1);
+    return '$received / $total MB';
   }
 }

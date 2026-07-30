@@ -34,6 +34,7 @@ dependencies:
   flutter_sing_box: ^1.1.4
   http: ^1.6.0
   mmkv: ^2.4.0
+  package_info_plus: ^10.2.1
   path_provider: ^2.1.0
   provider: ^6.1.5+1
 
@@ -62,6 +63,7 @@ flutter:
   assets:
     - assets/rule_sets/
     - assets/earth_map.jpg
+    - assets/logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
