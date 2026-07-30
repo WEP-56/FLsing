@@ -27,6 +27,14 @@ class AppState extends ChangeNotifier {
 
   bool _testingAll = false;
   Timer? _kernelTestTimer;
+  Timer? _kernelResultSettleTimer;
+  bool _kernelTesting = false;
+  bool _tcpTesting = false;
+  int _kernelTestStartedAt = 0;
+  final Map<String, int> _kernelTestTimes = {};
+  final Map<String, int> _kernelTestBaseline = {};
+  ClientGroup? _pendingKernelResult;
+  Completer<void>? _kernelTestCompleter;
 
   IpInfo? _ipInfo;
   bool _ipFetching = false;
@@ -239,16 +247,31 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _markAllTesting(true);
+    _kernelTesting = true;
     _testingAll = true;
+    _kernelTestStartedAt = DateTime.now().millisecondsSinceEpoch;
+    _kernelTestBaseline
+      ..clear()
+      ..addAll(_kernelTestTimes);
+    _pendingKernelResult = null;
+    final completion = Completer<void>();
+    _kernelTestCompleter = completion;
+    _markNodesTesting(
+      _nodes.map((node) => node.id),
+      testing: true,
+      clearLatency: true,
+    );
     notifyListeners();
     // groupStream 不保证回包（如测速全部超时），兜底解除加载态。
     _kernelTestTimer?.cancel();
+    _kernelResultSettleTimer?.cancel();
     _kernelTestTimer = Timer(const Duration(seconds: 25), _finishKernelTest);
     try {
       await _service.testGroup(_activeGroupTag!);
+      await completion.future;
     } catch (error) {
       _feedback = '测速失败：$error';
+      _pendingKernelResult = null;
       _finishKernelTest();
     }
   }
@@ -256,10 +279,23 @@ class AppState extends ChangeNotifier {
   void _finishKernelTest() {
     _kernelTestTimer?.cancel();
     _kernelTestTimer = null;
-    if (!_testingAll) return;
+    _kernelResultSettleTimer?.cancel();
+    _kernelResultSettleTimer = null;
+    if (!_kernelTesting) return;
+    final result = _pendingKernelResult;
+    if (result != null) {
+      _applyKernelTestResult(result);
+    } else {
+      _markNodesTesting(_nodes.map((node) => node.id), testing: false);
+    }
+    _kernelTesting = false;
     _testingAll = false;
-    _markAllTesting(false);
+    _pendingKernelResult = null;
+    _kernelTestBaseline.clear();
     notifyListeners();
+    final completion = _kernelTestCompleter;
+    _kernelTestCompleter = null;
+    if (completion != null && !completion.isCompleted) completion.complete();
   }
 
   /// TCP 直连测速：设备直接握手节点端口，无需开启 VPN。
@@ -270,42 +306,62 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _testingAll = ids.length > 1;
-    for (final id in targets) {
-      _replaceNode(id, testing: true);
-    }
+    _tcpTesting = true;
+    _testingAll = true;
+    _markNodesTesting(ids, testing: true, clearLatency: true);
     notifyListeners();
-    for (var i = 0; i < targets.length; i += _tcpProbeConcurrency) {
-      await Future.wait(
-        targets.skip(i).take(_tcpProbeConcurrency).map(_tcpProbe),
-      );
+    try {
+      final results = <String, int?>{for (final id in ids) id: null};
+      for (var i = 0; i < targets.length; i += _tcpProbeConcurrency) {
+        final batch = await Future.wait(
+          targets.skip(i).take(_tcpProbeConcurrency).map((id) async {
+            return (id: id, latency: await _tcpProbe(id));
+          }),
+        );
+        for (final result in batch) {
+          results[result.id] = result.latency;
+        }
+      }
+      for (final entry in results.entries) {
+        _replaceNode(
+          entry.key,
+          latency: entry.value,
+          testing: false,
+          clearLatency: true,
+        );
+      }
+    } finally {
+      _markNodesTesting(ids, testing: false);
+      _tcpTesting = false;
+      _testingAll = false;
+      notifyListeners();
     }
-    _testingAll = false;
-    notifyListeners();
   }
 
-  Future<void> _tcpProbe(String id) async {
+  Future<int?> _tcpProbe(String id) async {
     final endpoint = _endpoints[id]!;
     final watch = Stopwatch()..start();
-    int? latency;
     try {
       final socket = await Socket.connect(
         endpoint.host,
         endpoint.port,
         timeout: _tcpProbeTimeout,
       );
-      latency = watch.elapsedMilliseconds;
+      final latency = watch.elapsedMilliseconds;
       socket.destroy();
+      return latency;
     } catch (_) {
-      latency = null;
+      return null;
     }
-    _replaceNode(id, latency: latency, testing: false, clearLatency: true);
-    notifyListeners();
   }
 
-  void _markAllTesting(bool testing) {
-    for (var i = 0; i < _nodes.length; i++) {
-      _nodes[i] = _nodes[i].copyWith(testing: testing);
+  void _markNodesTesting(
+    Iterable<String> ids, {
+    required bool testing,
+    bool clearLatency = false,
+  }) {
+    for (final id in ids.toList()) {
+      _replaceNode(id, testing: testing, clearLatency: clearLatency);
     }
   }
 
@@ -447,7 +503,9 @@ class AppState extends ChangeNotifier {
         _startTimer();
         unawaited(_applySelectionToRunningService());
         // 隧道建立后路由需要片刻收敛，稍等再检测出口 IP。
-        unawaited(refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)));
+        unawaited(
+          refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)),
+        );
       case ProxyState.stopping:
         _phase = ConnectionPhase.disconnecting;
       case ProxyState.stopped:
@@ -466,23 +524,91 @@ class AppState extends ChangeNotifier {
   }
 
   void _onGroups(List<ClientGroup> groups) {
-    final group = groups
-        .where((item) => item.selectable && (item.items?.isNotEmpty ?? false))
-        .firstOrNull;
+    final activeGroup = _activeGroupTag == null
+        ? null
+        : groups
+              .where(
+                (item) =>
+                    item.tag == _activeGroupTag &&
+                    (item.items?.isNotEmpty ?? false),
+              )
+              .firstOrNull;
+    final group =
+        activeGroup ??
+        groups
+            .where(
+              (item) => item.selectable && (item.items?.isNotEmpty ?? false),
+            )
+            .firstOrNull;
     if (group == null) return;
     _activeGroupTag = group.tag;
     _selectedNodeId = group.selected;
-    final hasDelays = group.items!.any((item) => item.urlTestDelay > 0);
+
+    // TCP 测速的数据源是设备 Socket，内核事件不能覆盖这一批前端状态。
+    if (_tcpTesting) return;
+
+    if (_kernelTesting) {
+      if (_hasFreshKernelResult(group)) {
+        _pendingKernelResult = group;
+        _kernelResultSettleTimer?.cancel();
+        // groupStream 可能分多次推送同一批结果，等事件短暂静默后再统一提交。
+        _kernelResultSettleTimer = Timer(
+          const Duration(milliseconds: 350),
+          _finishKernelTest,
+        );
+      }
+      return;
+    }
+
+    _rememberKernelTestTimes(group);
     _nodes
       ..clear()
       ..addAll(group.items!.map(_nodeFromGroupItem));
-    if (_testingAll && !hasDelays) {
-      // 内核测速还没出结果，保持加载态。
-      _markAllTesting(true);
-    } else if (_testingAll) {
-      _finishKernelTest();
-    }
     notifyListeners();
+  }
+
+  bool _hasFreshKernelResult(ClientGroup group) =>
+      group.items!.any((item) => _isFreshKernelItem(item));
+
+  bool _isFreshKernelItem(ClientGroupItem item) {
+    if (item.urlTestTime <= 0) return false;
+    final baseline = _kernelTestBaseline[item.tag];
+    if (baseline != null) return item.urlTestTime > baseline;
+
+    // libbox 版本间可能使用秒、毫秒、微秒或纳秒时间戳。
+    var requestTime = _kernelTestStartedAt;
+    if (item.urlTestTime < 100000000000) {
+      requestTime ~/= 1000;
+    } else if (item.urlTestTime >= 100000000000000000) {
+      requestTime *= 1000000;
+    } else if (item.urlTestTime >= 100000000000000) {
+      requestTime *= 1000;
+    }
+    return item.urlTestTime >= requestTime;
+  }
+
+  void _applyKernelTestResult(ClientGroup group) {
+    _rememberKernelTestTimes(group);
+    _nodes
+      ..clear()
+      ..addAll(
+        group.items!.map((item) {
+          final fresh = _isFreshKernelItem(item);
+          return _nodeFromGroupItem(
+            item,
+            latency: fresh && item.urlTestDelay > 0 ? item.urlTestDelay : null,
+            overrideLatency: true,
+          );
+        }),
+      );
+  }
+
+  void _rememberKernelTestTimes(ClientGroup group) {
+    _kernelTestTimes
+      ..clear()
+      ..addEntries(
+        group.items!.map((item) => MapEntry(item.tag, item.urlTestTime)),
+      );
   }
 
   void _onClashMode(ClientClashMode mode) {
@@ -546,6 +672,7 @@ class AppState extends ChangeNotifier {
     final group = await _service.configuredNodeGroup(profile);
     if (group == null) return;
     _activeGroupTag = group.tag;
+    _kernelTestTimes.clear();
     _endpoints.clear();
     for (final node in group.nodes) {
       if (node.server != null && node.serverPort != null) {
@@ -584,14 +711,20 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  ProxyNode _nodeFromGroupItem(ClientGroupItem item) => ProxyNode(
+  ProxyNode _nodeFromGroupItem(
+    ClientGroupItem item, {
+    int? latency,
+    bool overrideLatency = false,
+  }) => ProxyNode(
     id: item.tag,
     country: '',
     flag: '•',
     name: item.tag,
     protocol: item.type,
     transport: '',
-    latency: item.urlTestDelay > 0 ? item.urlTestDelay : null,
+    latency: overrideLatency
+        ? latency
+        : (item.urlTestDelay > 0 ? item.urlTestDelay : null),
   );
 
   SubscriptionItem? _findProfile(String? id) {
@@ -643,6 +776,9 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _connectionTimer?.cancel();
     _kernelTestTimer?.cancel();
+    _kernelResultSettleTimer?.cancel();
+    final completion = _kernelTestCompleter;
+    if (completion != null && !completion.isCompleted) completion.complete();
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }

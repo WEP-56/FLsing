@@ -100,10 +100,14 @@ class _NodeRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Text('延迟 ',
-                            style: TextStyle(fontSize: 12, color: c.text4)),
                         Text(
-                          n.latency == null ? '超时' : '${n.latency} ms',
+                          '延迟 ',
+                          style: TextStyle(fontSize: 12, color: c.text4),
+                        ),
+                        Text(
+                          n.testing
+                              ? ''
+                              : (n.latency == null ? '超时' : '${n.latency} ms'),
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
@@ -112,11 +116,12 @@ class _NodeRow extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        SignalBars(
-                          level: FlsingColors.latencyLevel(n.latency),
-                          size: 10,
-                          color: c.latency(n.latency),
-                        ),
+                        if (!n.testing)
+                          SignalBars(
+                            level: FlsingColors.latencyLevel(n.latency),
+                            size: 10,
+                            color: c.latency(n.latency),
+                          ),
                       ],
                     ),
                   ],

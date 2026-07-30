@@ -232,7 +232,9 @@ class _NodeSheetState extends State<NodeSheet> {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              updatedAt == null ? '尚未导入订阅' : '上次更新：${formatDateTime(updatedAt)}',
+              updatedAt == null
+                  ? '尚未导入订阅'
+                  : '上次更新：${formatDateTime(updatedAt)}',
               style: TextStyle(
                 fontSize: 11.5,
                 color: c.text5,
@@ -360,7 +362,7 @@ class _CountryChip extends StatelessWidget {
 }
 
 String _latencyText(ProxyNode node) =>
-    node.latency == null ? '--' : '${node.latency} ms';
+    node.testing ? '' : (node.latency == null ? '--' : '${node.latency} ms');
 
 class _NodeListTile extends StatelessWidget {
   const _NodeListTile({required this.node});
@@ -475,11 +477,7 @@ class _NodeListTile extends StatelessWidget {
                       child: SizedBox(
                         width: 26,
                         height: 32,
-                        child: Icon(
-                          Icons.more_vert,
-                          size: 16,
-                          color: c.text4,
-                        ),
+                        child: Icon(Icons.more_vert, size: 16, color: c.text4),
                       ),
                     ),
                   ),
@@ -646,9 +644,7 @@ class _RadioDot extends StatelessWidget {
           width: 1.4,
         ),
       ),
-      child: selected
-          ? Icon(Icons.check, size: 13, color: c.inverseFg)
-          : null,
+      child: selected ? Icon(Icons.check, size: 13, color: c.inverseFg) : null,
     );
   }
 }
@@ -676,7 +672,7 @@ class _TestButton extends StatelessWidget {
               },
         child: SizedBox.square(
           dimension: 36,
-          child: node.testing
+          child: state.isTestingAny
               ? Padding(
                   padding: const EdgeInsets.all(10),
                   child: CircularProgressIndicator(
