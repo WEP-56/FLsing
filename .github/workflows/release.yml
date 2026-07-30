@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.9
+          cache: true
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/flsing-release.jks
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=flsing-release.jks
+          EOF
+
+      - run: flutter pub get
+
+      - run: flutter analyze
+
+      - run: flutter test
+
+      - name: Build split-per-abi APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Rename artifacts
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          out=build/app/outputs/flutter-apk
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "$out/app-$abi-release.apk" "dist/FLsing-$version-$abi.apk"
+          done
+          cp "$out/app-release.apk" "dist/FLsing-$version-universal.apk"
+          ls -la dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true

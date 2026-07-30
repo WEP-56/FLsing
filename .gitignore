@@ -49,5 +49,8 @@ app.*.map.json
 .agents/
 .claude/
 
+# Signing credentials (never commit)
+/signing-info.md
+
 # Design reference assets (kept local only)
 /example/
