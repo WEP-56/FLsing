@@ -61,6 +61,7 @@ flutter:
 
   assets:
     - assets/rule_sets/
+    - assets/earth_map.jpg
 
   # To add assets to your application, add an assets section, like this:
   # assets:

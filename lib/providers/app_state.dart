@@ -5,13 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_sing_box/flutter_sing_box.dart';
 
 import '../data/services/app_settings.dart';
+import '../data/services/ip_service.dart';
 import '../data/services/sing_box_service.dart';
 import '../models/app_models.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({SingBoxService? service}) : _service = service ?? SingBoxService();
+  AppState({SingBoxService? service, IpService? ipService})
+    : _service = service ?? SingBoxService(),
+      _ipService = ipService ?? IpService();
 
   final SingBoxService _service;
+  final IpService _ipService;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final List<SubscriptionItem> _profiles = [];
   final List<ProxyNode> _nodes = [];
@@ -23,6 +27,10 @@ class AppState extends ChangeNotifier {
 
   bool _testingAll = false;
   Timer? _kernelTestTimer;
+
+  IpInfo? _ipInfo;
+  bool _ipFetching = false;
+  int _ipRequestSeq = 0;
 
   ConnectionPhase _phase = ConnectionPhase.disconnected;
   ProxyMode _mode = ProxyMode.rule;
@@ -53,6 +61,38 @@ class AppState extends ChangeNotifier {
   bool get isTestingAll => _testingAll;
   bool get isTestingAny => _testingAll || _nodes.any((node) => node.testing);
 
+  IpInfo? get ipInfo => _ipInfo;
+
+  /// 还没有任何 IP 结果时的初始加载态（IpChip 显示骨架条）。
+  bool get ipLoading => _ipFetching && _ipInfo == null;
+
+  /// 已有结果、正在重新检测（IpChip 刷新按钮旋转）。
+  bool get ipRefreshing => _ipFetching && _ipInfo != null;
+
+  /// 重新检测当前出口 / 本地 IP。
+  ///
+  /// 连接状态切换后系统路由需要一点时间收敛，[settleDelay] 用来错开这段时间。
+  Future<void> refreshIpInfo({Duration settleDelay = Duration.zero}) async {
+    final seq = ++_ipRequestSeq;
+    if (settleDelay > Duration.zero) {
+      await Future<void>.delayed(settleDelay);
+      if (seq != _ipRequestSeq) return;
+    }
+    _ipFetching = true;
+    notifyListeners();
+    final result = await _ipService.fetch();
+    if (seq != _ipRequestSeq) return;
+    _ipFetching = false;
+    if (result != null) {
+      _ipInfo = IpInfo(
+        ip: result.ip,
+        region: result.region,
+        isExit: isConnected && _mode != ProxyMode.direct,
+      );
+    }
+    notifyListeners();
+  }
+
   String? takeFeedback() {
     final message = _feedback;
     _feedback = null;
@@ -75,6 +115,7 @@ class AppState extends ChangeNotifier {
       if (AppSettings().autoUpdateSubscriptions) {
         unawaited(_refreshStaleSubscriptions());
       }
+      unawaited(refreshIpInfo());
     } catch (error) {
       _feedback = 'sing-box 初始化失败：$error';
     } finally {
@@ -113,6 +154,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     try {
       await _service.setMode(_pluginMode(mode), connected: isConnected);
+      if (isConnected) unawaited(refreshIpInfo());
     } catch (error) {
       _mode = previous;
       _feedback = '切换模式失败：$error';
@@ -129,6 +171,16 @@ class AppState extends ChangeNotifier {
       _feedback = '规则库更新失败：$error';
     }
     notifyListeners();
+  }
+
+  /// 测速链接等设置变更后，重新对使用中的配置打补丁。
+  Future<void> applySettingsPatch() async {
+    try {
+      await _service.applySettingsPatch();
+    } catch (error) {
+      _feedback = '应用设置失败：$error';
+      notifyListeners();
+    }
   }
 
   Future<void> selectNode(String id) async {
@@ -386,6 +438,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _onProxyState(ProxyState state) {
+    final previous = _phase;
     switch (state) {
       case ProxyState.starting:
         _phase = ConnectionPhase.connecting;
@@ -393,6 +446,8 @@ class AppState extends ChangeNotifier {
         _phase = ConnectionPhase.connected;
         _startTimer();
         unawaited(_applySelectionToRunningService());
+        // 隧道建立后路由需要片刻收敛，稍等再检测出口 IP。
+        unawaited(refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)));
       case ProxyState.stopping:
         _phase = ConnectionPhase.disconnecting;
       case ProxyState.stopped:
@@ -400,6 +455,12 @@ class AppState extends ChangeNotifier {
         _connectionTimer?.cancel();
         _connectedFor = Duration.zero;
         _phase = ConnectionPhase.disconnected;
+        if (previous == ConnectionPhase.connected ||
+            previous == ConnectionPhase.disconnecting) {
+          unawaited(
+            refreshIpInfo(settleDelay: const Duration(milliseconds: 800)),
+          );
+        }
     }
     notifyListeners();
   }

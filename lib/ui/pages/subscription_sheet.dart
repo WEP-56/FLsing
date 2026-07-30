@@ -5,26 +5,18 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_messenger.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/motion.dart';
+import '../../core/theme/flsing_theme.dart';
 import '../../data/services/configuration_file_importer.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_state.dart';
-import '../widgets/app_surfaces.dart';
+import '../widgets/flsing_sheets.dart';
+import 'node_sheet.dart' show formatDateTime;
 
 Future<void> showSubscriptionSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: AppColors.surface,
-    barrierColor: Colors.black.withValues(alpha: 0.72),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
-    builder: (_) => const FractionallySizedBox(
-      heightFactor: 0.82,
-      child: SubscriptionSheet(),
-    ),
+  return FlsingSheets.partial(
+    context,
+    builder: (_) => const SubscriptionSheet(),
   );
 }
 
@@ -38,191 +30,243 @@ class SubscriptionSheet extends StatefulWidget {
 class _SubscriptionSheetState extends State<SubscriptionSheet> {
   @override
   Widget build(BuildContext context) {
-    final state = context.read<AppState>();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-      child: Column(
-        children: [
-          const SheetHandle(),
-          const SizedBox(height: 18),
-          Row(
+    final state = context.watch<AppState>();
+    final c = FlsingColors.of(context);
+    final subs = state.subscriptions;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
+          child: Row(
             children: [
-              Text('订阅管理', style: Theme.of(context).textTheme.headlineMedium),
+              Text(
+                '订阅管理',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: c.text1,
+                ),
+              ),
               const Spacer(),
               PopupMenuButton<String>(
                 tooltip: '添加订阅',
-                icon: const Icon(Icons.add),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.white.withValues(alpha: 0.08),
-                ),
                 onSelected: _addSubscription,
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'link',
-                    child: ListTile(
-                      leading: Icon(Icons.link),
-                      title: Text('链接导入'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'clipboard',
-                    child: ListTile(
-                      leading: Icon(Icons.content_paste),
-                      title: Text('剪贴板'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'file',
-                    child: ListTile(
-                      leading: Icon(Icons.insert_drive_file_outlined),
-                      title: Text('文件导入'),
-                    ),
+                itemBuilder: (_) => [
+                  _importMenuItem(c, 'link', Icons.link, '链接导入'),
+                  _importMenuItem(c, 'clipboard', Icons.content_paste, '剪贴板'),
+                  _importMenuItem(
+                    c,
+                    'file',
+                    Icons.insert_drive_file_outlined,
+                    '文件导入',
                   ),
                 ],
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: c.surface2,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.border1),
+                  ),
+                  child: Icon(Icons.add, size: 20, color: c.text1),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: ListView.separated(
-              itemCount: state.subscriptions.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) =>
-                  _SubscriptionTile(item: state.subscriptions[index]),
-            ),
+        ),
+        Expanded(
+          child: subs.isEmpty
+              ? Center(
+                  child: Text(
+                    '还没有订阅，点右上角 + 导入',
+                    style: TextStyle(fontSize: 13, color: c.text5),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
+                  itemCount: subs.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) => StaggeredEntrance(
+                    index: index,
+                    child: _SubscriptionTile(item: subs[index]),
+                  ),
+                ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            10,
+            20,
+            MediaQuery.paddingOf(context).bottom + 14,
           ),
-          const SizedBox(height: 8),
-          const Row(
+          child: Row(
             children: [
-              Icon(Icons.info_outline, size: 17, color: AppColors.secondary),
-              SizedBox(width: 8),
+              Icon(Icons.info_outline, size: 13, color: c.text5),
+              const SizedBox(width: 6),
               Text(
                 '长按订阅项可快速操作',
-                style: TextStyle(color: AppColors.secondary, fontSize: 12),
+                style: TextStyle(fontSize: 11.5, color: c.text5),
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  PopupMenuItem<String> _importMenuItem(
+    FlsingColors c,
+    String value,
+    IconData icon,
+    String label,
+  ) {
+    return PopupMenuItem(
+      value: value,
+      height: 44,
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: c.text3),
+          const SizedBox(width: 12),
+          Text(label),
         ],
       ),
     );
   }
 
   Future<void> _addSubscription(String source) async {
-    late final bool changed;
     if (source == 'link') {
-      if (!mounted) return;
-      changed = await _showSubscriptionForm(context);
+      await showSubscriptionForm(context);
     } else if (source == 'clipboard') {
-      changed = await _importClipboard();
+      await _importClipboard();
     } else if (source == 'file') {
-      changed = await _importFile();
-    } else {
-      changed = false;
+      await _importFile();
     }
-    if (changed && mounted) setState(() {});
   }
 
-  Future<bool> _importClipboard() async {
+  Future<void> _importClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (!mounted) return false;
+    if (!mounted) return;
     final value = data?.text?.trim() ?? '';
     final uri = Uri.tryParse(value);
     if (uri == null || !uri.hasScheme) {
       showAppMessage('剪贴板中没有有效链接');
-      return false;
+      return;
     }
-    return _showSubscriptionForm(context, initialUrl: value);
+    await showSubscriptionForm(context, initialUrl: value);
   }
 
-  Future<bool> _importFile() async {
+  Future<void> _importFile() async {
     final path = await ConfigurationFileImporter().pickFile();
-    if (!mounted || path == null) return false;
-    final success = await context.read<AppState>().addSubscriptionFile(
-      File(path),
-    );
-    if (!mounted) return false;
-    final message = context.read<AppState>().takeFeedback();
+    if (!mounted || path == null) return;
+    final state = context.read<AppState>();
+    await state.addSubscriptionFile(File(path));
+    final message = state.takeFeedback();
     if (message != null) showAppMessage(message);
-    return success;
   }
 }
 
 class _SubscriptionTile extends StatelessWidget {
   const _SubscriptionTile({required this.item});
+
   final SubscriptionItem item;
 
   @override
   Widget build(BuildContext context) {
-    final state = context.read<AppState>();
+    final state = context.watch<AppState>();
+    final c = FlsingColors.of(context);
     final active = state.activeSubscription?.id == item.id;
+
     return Material(
-      color: Colors.white.withValues(alpha: 0.05),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: AppColors.border),
-      ),
+      color: active ? c.surface2 : c.surface1,
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => state.activateSubscription(item.id),
-        onLongPress: () => _showSubscriptionActions(context, item),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+        borderRadius: BorderRadius.circular(16),
+        onTap: active
+            ? null
+            : () async {
+                await state.activateSubscription(item.id);
+                final message = state.takeFeedback();
+                if (message != null) showAppMessage(message);
+              },
+        onLongPress: () => _showMenu(context),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: active ? c.border2 : c.border1),
+          ),
           child: Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: c.text1,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: active ? c.accentSoft : c.surface2,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            active ? '已启用' : '未启用',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500,
+                              color: active ? c.accent : c.text4,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 5),
                     Text(
                       item.url,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.secondary),
+                      style: TextStyle(fontSize: 12, color: c.text4),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 4),
                     Text(
-                      '更新时间：${_formatDate(item.updatedAt)}',
-                      style: const TextStyle(
-                        color: AppColors.secondary,
-                        fontSize: 12,
+                      '更新时间：${formatDateTime(item.updatedAt)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: c.text5,
+                        fontFeatures: kTabularFigures,
                       ),
                     ),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: active
-                      ? AppColors.success.withValues(alpha: 0.13)
-                      : Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  active ? '已启用' : '未启用',
-                  style: TextStyle(
-                    color: active ? AppColors.success : AppColors.secondary,
-                    fontSize: 12,
+              Builder(
+                builder: (buttonContext) => InkResponse(
+                  onTap: () => _showMenu(buttonContext),
+                  radius: 18,
+                  child: SizedBox(
+                    width: 32,
+                    height: 40,
+                    child: Icon(Icons.more_vert, size: 17, color: c.text4),
                   ),
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '更多操作',
-                onSelected: (value) => _handleAction(context, item, value),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('编辑')),
-                  PopupMenuItem(value: 'refresh', child: Text('更新')),
-                  PopupMenuItem(value: 'copy', child: Text('复制链接')),
-                  PopupMenuItem(value: 'delete', child: Text('删除')),
-                ],
               ),
             ],
           ),
@@ -230,103 +274,64 @@ class _SubscriptionTile extends StatelessWidget {
       ),
     );
   }
-}
 
-String _formatDate(DateTime value) =>
-    '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
-
-Future<void> _showSubscriptionActions(
-  BuildContext context,
-  SubscriptionItem item,
-) {
-  return showModalBottomSheet<void>(
-    context: context,
-    builder: (_) => SafeArea(
-      child: Wrap(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('编辑'),
-            onTap: () {
-              Navigator.pop(context);
-              _showSubscriptionForm(context, item: item);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.refresh),
-            title: const Text('更新'),
-            onTap: () {
-              context.read<AppState>().refreshSubscription(item.id);
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.copy_outlined),
-            title: const Text('复制链接'),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: item.url));
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: AppColors.danger),
-            title: const Text('删除', style: TextStyle(color: AppColors.danger)),
-            onTap: () {
-              Navigator.pop(context);
-              _confirmDelete(context, item);
-            },
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-Future<void> _handleAction(
-  BuildContext context,
-  SubscriptionItem item,
-  String action,
-) async {
-  final state = context.read<AppState>();
-  switch (action) {
-    case 'edit':
-      _showSubscriptionForm(context, item: item);
-    case 'refresh':
-      await state.refreshSubscription(item.id);
-      if (!context.mounted) return;
-      _showMessage(context, '订阅时间已更新');
-    case 'copy':
-      await Clipboard.setData(ClipboardData(text: item.url));
-      if (context.mounted) _showMessage(context, '链接已复制');
-    case 'delete':
-      if (context.mounted) _confirmDelete(context, item);
-  }
-}
-
-Future<void> _confirmDelete(BuildContext context, SubscriptionItem item) async {
-  final approved = await showDialog<bool>(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('删除订阅？'),
-      content: Text('将删除“${item.name}”。此操作无法撤销。'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('取消'),
+  void _showMenu(BuildContext context) {
+    final state = context.read<AppState>();
+    showFlsingMenu(
+      context,
+      position: menuPositionFrom(context),
+      items: [
+        SheetMenuItem(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => showSubscriptionForm(context, item: item),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('删除'),
+        SheetMenuItem(
+          icon: Icons.refresh,
+          label: '更新',
+          onTap: () async {
+            await state.refreshSubscription(item.id);
+            final message = state.takeFeedback();
+            showAppMessage(message ?? '订阅已更新');
+          },
+        ),
+        SheetMenuItem(
+          icon: Icons.copy_outlined,
+          label: '复制链接',
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: item.url));
+            showAppMessage('链接已复制');
+          },
+        ),
+        SheetMenuItem(
+          icon: Icons.delete_outline,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmDelete(context),
         ),
       ],
-    ),
-  );
-  if (approved == true && context.mounted) {
-    await context.read<AppState>().deleteSubscription(item.id);
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final state = context.read<AppState>();
+    if (state.subscriptions.length <= 1) {
+      showAppMessage('至少保留一个订阅');
+      return;
+    }
+    final approved = await confirmDestructive(
+      context,
+      title: '删除订阅？',
+      message: '将删除“${item.name}”及其节点列表。此操作无法撤销。',
+    );
+    if (!approved) return;
+    await state.deleteSubscription(item.id);
+    final message = state.takeFeedback();
+    if (message != null) showAppMessage(message);
   }
 }
 
-Future<bool> _showSubscriptionForm(
+Future<bool> showSubscriptionForm(
   BuildContext context, {
   SubscriptionItem? item,
   String initialUrl = '',
@@ -448,6 +453,3 @@ class _SubscriptionFormDialogState extends State<_SubscriptionFormDialog> {
     );
   }
 }
-
-void _showMessage(BuildContext context, String message) =>
-    showAppMessage(message);

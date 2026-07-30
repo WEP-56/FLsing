@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仅为 ip-api.com（免 key IP 检测，仅提供 http）放行明文流量，其余保持系统默认禁止。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">ip-api.com</domain>
+    </domain-config>
+</network-security-config>

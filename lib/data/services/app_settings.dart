@@ -34,6 +34,25 @@ class AppSettings {
       _store.getString(_Keys.latencyTestMethod) ?? LatencyTestMethod.smart;
   set latencyTestMethod(String value) =>
       _store.setString(_Keys.latencyTestMethod, value);
+
+  /// 主题模式：system / light / dark。
+  String get themeMode => _store.getString(_Keys.themeMode) ?? ThemeModeOption.system;
+  set themeMode(String value) => _store.setString(_Keys.themeMode, value);
+
+  /// 内核 urltest 测速链接。
+  static const defaultTestUrl = 'https://www.gstatic.com/generate_204';
+  String get testUrl {
+    final value = _store.getString(_Keys.testUrl);
+    return (value == null || value.isEmpty) ? defaultTestUrl : value;
+  }
+
+  set testUrl(String value) => _store.setString(_Keys.testUrl, value.trim());
+}
+
+class ThemeModeOption {
+  static const system = 'system';
+  static const light = 'light';
+  static const dark = 'dark';
 }
 
 class LatencyTestMethod {
@@ -48,4 +67,6 @@ class _Keys {
   static const subscriptionStaleHours = 'subscription_stale_hours';
   static const ruleSetUpdatedAt = 'rule_set_updated_at';
   static const latencyTestMethod = 'latency_test_method';
+  static const themeMode = 'theme_mode';
+  static const testUrl = 'test_url';
 }

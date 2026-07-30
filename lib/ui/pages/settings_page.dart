@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_messenger.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/flsing_theme.dart';
 import '../../data/services/app_settings.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_state.dart';
+import '../../providers/theme_provider.dart';
 import '../widgets/app_surfaces.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -21,7 +22,9 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final themeProvider = context.watch<ThemeProvider>();
     final settings = AppSettings();
+    final c = FlsingColors.of(context);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -49,6 +52,22 @@ class _SettingsPageState extends State<SettingsPage> {
                   Expanded(
                     child: ListView(
                       children: [
+                        const _SectionHeader('外观'),
+                        _SettingsGroup(
+                          children: [
+                            for (final option in const [
+                              (ThemeMode.system, '跟随系统', '与系统深浅模式保持一致'),
+                              (ThemeMode.light, '浅色', '暖调纸白'),
+                              (ThemeMode.dark, '深色', '纯黑背景，OLED 友好'),
+                            ])
+                              _CheckTile(
+                                label: option.$2,
+                                subtitle: option.$3,
+                                active: themeProvider.mode == option.$1,
+                                onTap: () => themeProvider.setMode(option.$1),
+                              ),
+                          ],
+                        ),
                         const _SectionHeader('代理方式'),
                         _SettingsGroup(
                           children: [
@@ -93,6 +112,24 @@ class _SettingsPageState extends State<SettingsPage> {
                               method: LatencyTestMethod.proxy,
                               onChanged: () => setState(() {}),
                             ),
+                            ListTile(
+                              title: const Text('测试链接'),
+                              subtitle: Text(
+                                settings.testUrl,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: c.text4,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              trailing: Icon(
+                                Icons.edit_outlined,
+                                size: 18,
+                                color: c.text4,
+                              ),
+                              onTap: () => _editTestUrl(settings),
+                            ),
                           ],
                         ),
                         const _SectionHeader('订阅'),
@@ -102,10 +139,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               title: const Text('自动更新订阅'),
                               subtitle: Text(
                                 '打开应用时刷新超过 ${settings.subscriptionStaleHours} 小时未更新的订阅',
-                                style: const TextStyle(
-                                  color: AppColors.secondary,
-                                  fontSize: 13,
-                                ),
+                                style: TextStyle(color: c.text4, fontSize: 13),
                               ),
                               value: settings.autoUpdateSubscriptions,
                               onChanged: (value) => setState(
@@ -117,9 +151,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               title: const Text('更新间隔'),
                               trailing: Text(
                                 '${settings.subscriptionStaleHours} 小时',
-                                style: const TextStyle(
-                                  color: AppColors.secondary,
-                                ),
+                                style: TextStyle(color: c.text4),
                               ),
                               onTap: () => _pickStaleHours(settings),
                             ),
@@ -132,10 +164,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               title: const Text('更新规则库'),
                               subtitle: Text(
                                 _ruleSetSubtitle(settings),
-                                style: const TextStyle(
-                                  color: AppColors.secondary,
-                                  fontSize: 13,
-                                ),
+                                style: TextStyle(color: c.text4, fontSize: 13),
                               ),
                               trailing: _updatingRuleSets
                                   ? const SizedBox(
@@ -145,7 +174,11 @@ class _SettingsPageState extends State<SettingsPage> {
                                         strokeWidth: 2,
                                       ),
                                     )
-                                  : const Icon(Icons.refresh),
+                                  : Icon(
+                                      Icons.refresh,
+                                      size: 20,
+                                      color: c.text3,
+                                    ),
                               onTap: _updatingRuleSets
                                   ? null
                                   : () => _updateRuleSets(state),
@@ -163,7 +196,6 @@ class _SettingsPageState extends State<SettingsPage> {
                         const _SettingsGroup(
                           children: [
                             _PlaceholderTile(title: '分应用代理'),
-                            _PlaceholderTile(title: '自定义测速地址'),
                             _PlaceholderTile(title: 'DNS 设置'),
                             _PlaceholderTile(title: '日志查看'),
                           ],
@@ -220,6 +252,72 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() => _updatingRuleSets = false);
   }
 
+  Future<void> _editTestUrl(AppSettings settings) async {
+    final controller = TextEditingController(text: settings.testUrl);
+    final formKey = GlobalKey<FormState>();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('测试链接'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: controller,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: '延迟测试地址',
+                  hintText: AppSettings.defaultTestUrl,
+                ),
+                validator: (value) {
+                  final uri = Uri.tryParse(value?.trim() ?? '');
+                  return uri != null &&
+                          (uri.scheme == 'http' || uri.scheme == 'https')
+                      ? null
+                      : '请输入有效的 http(s) 链接';
+                },
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () =>
+                      controller.text = AppSettings.defaultTestUrl,
+                  child: const Text('恢复默认'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true) {
+      settings.testUrl = controller.text.trim();
+      if (!mounted) return;
+      await context.read<AppState>().applySettingsPatch();
+      if (mounted) {
+        setState(() {});
+        showAppMessage('测试链接已保存，重新连接后生效');
+      }
+    }
+  }
+
   Future<void> _pickStaleHours(AppSettings settings) async {
     final selected = await showDialog<int>(
       context: context,
@@ -260,7 +358,7 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
       child: Text(
         title,
-        style: const TextStyle(color: AppColors.secondary, fontSize: 13),
+        style: TextStyle(color: FlsingColors.of(context).text4, fontSize: 13),
       ),
     );
   }
@@ -272,14 +370,40 @@ class _SettingsGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = FlsingColors.of(context);
     return Material(
-      color: Colors.white.withValues(alpha: 0.05),
+      color: c.surface1,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: c.border1),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(children: children),
+    );
+  }
+}
+
+class _CheckTile extends StatelessWidget {
+  const _CheckTile({
+    required this.label,
+    required this.subtitle,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final String subtitle;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FlsingColors.of(context);
+    return ListTile(
+      title: Text(label),
+      subtitle: Text(subtitle, style: TextStyle(color: c.text4, fontSize: 13)),
+      trailing: active ? Icon(Icons.check, color: c.accent) : null,
+      onTap: active ? null : onTap,
     );
   }
 }
@@ -299,19 +423,11 @@ class _ModeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = mode == current;
-    return ListTile(
-      title: Text(label),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(color: AppColors.secondary, fontSize: 13),
-      ),
-      trailing: active
-          ? const Icon(Icons.check, color: AppColors.success)
-          : null,
-      onTap: active
-          ? null
-          : () => context.read<AppState>().selectMode(mode),
+    return _CheckTile(
+      label: label,
+      subtitle: subtitle,
+      active: mode == current,
+      onTap: () => context.read<AppState>().selectMode(mode),
     );
   }
 }
@@ -331,22 +447,14 @@ class _LatencyMethodTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = AppSettings().latencyTestMethod == method;
-    return ListTile(
-      title: Text(label),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(color: AppColors.secondary, fontSize: 13),
-      ),
-      trailing: active
-          ? const Icon(Icons.check, color: AppColors.success)
-          : null,
-      onTap: active
-          ? null
-          : () {
-              AppSettings().latencyTestMethod = method;
-              onChanged();
-            },
+    return _CheckTile(
+      label: label,
+      subtitle: subtitle,
+      active: AppSettings().latencyTestMethod == method,
+      onTap: () {
+        AppSettings().latencyTestMethod = method;
+        onChanged();
+      },
     );
   }
 }
@@ -360,9 +468,9 @@ class _PlaceholderTile extends StatelessWidget {
     return ListTile(
       enabled: false,
       title: Text(title),
-      trailing: const Text(
+      trailing: Text(
         '开发中',
-        style: TextStyle(color: AppColors.secondary, fontSize: 12),
+        style: TextStyle(color: FlsingColors.of(context).text5, fontSize: 12),
       ),
     );
   }
@@ -376,7 +484,7 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = const TextStyle(color: AppColors.secondary);
+    final style = TextStyle(color: FlsingColors.of(context).text4);
     return ListTile(
       title: Text(label),
       trailing: future != null

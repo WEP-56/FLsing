@@ -2,6 +2,17 @@ enum ConnectionPhase { disconnected, connecting, connected, disconnecting }
 
 enum ProxyMode { rule, global, direct }
 
+/// IP 检测结果。
+class IpInfo {
+  const IpInfo({required this.ip, required this.region, required this.isExit});
+
+  final String ip;
+  final String region;
+
+  /// true = 走代理的出口 IP，false = 本地 IP
+  final bool isExit;
+}
+
 class ProxyNode {
   const ProxyNode({
     required this.id,

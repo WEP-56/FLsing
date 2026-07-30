@@ -174,6 +174,10 @@ class SingBoxService {
     if (connected) await _client.serviceReload();
   }
 
+  /// 设置变更（如测速链接）后重新对使用中的配置打补丁。
+  /// 不主动重载服务，连接中的流量不受影响，重新连接后生效。
+  Future<void> applySettingsPatch() => _patchUsingConfig();
+
   Future<void> _activateProfile(Profile profile) async {
     ProfileStorage().setSelectedProfile(profile.id);
     final config = await ProfileStorage().getUsingConfig();
@@ -184,7 +188,8 @@ class SingBoxService {
   /// 对即将使用的配置做本地化修正：
   /// - 远程规则集改为内置/已下载的本地文件（远端地址在国内直连拉不动）；
   /// - 未识别的远程规则集下载改走代理；
-  /// - 写入持久化的默认代理模式。
+  /// - 写入持久化的默认代理模式；
+  /// - urltest 出站统一改用设置中的测速链接。
   Future<void> _patchUsingConfig() async {
     final file = await ProfileStorage().getUsingConfig();
     if (!await file.exists()) return;
@@ -197,6 +202,15 @@ class SingBoxService {
     clashApi['default_mode'] = preferredMode;
     experimental['clash_api'] = clashApi;
     config['experimental'] = experimental;
+
+    if (config['outbounds'] is List) {
+      for (final outbound
+          in (config['outbounds'] as List).whereType<Map<String, dynamic>>()) {
+        if (outbound['type'] == OutboundType.urltest) {
+          outbound['url'] = AppSettings().testUrl;
+        }
+      }
+    }
 
     final route = config['route'];
     if (route is Map<String, dynamic> && route['rule_set'] is List) {
@@ -274,7 +288,7 @@ class SingBoxService {
         'tag': 'auto',
         'type': OutboundType.urltest,
         'outbounds': tags,
-        'url': FlutterSingBoxConstants.defaultTestUrl,
+        'url': AppSettings().testUrl,
         'interval': FlutterSingBoxConstants.defaultUrlTestInterval,
         'tolerance': FlutterSingBoxConstants.defaultUrlTestTolerance,
       },
