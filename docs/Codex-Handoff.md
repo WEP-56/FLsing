@@ -7,7 +7,7 @@ Last updated: 2026-07-30
 - Workspace: `D:\FLsing`
 - Product: Android Flutter client backed by `flutter_sing_box` / sing-box.
 - Current package version: `1.1.0+3`.
-- Latest committed baseline: `dd89dbf 完成T0 设置，优化订阅显示（用量、日期）`.
+- Latest committed baseline: `13383af 完成T1相关设置，跳过VPN绕过开关（插件未暴露）`.
 
 ## User Constraints
 
@@ -17,13 +17,13 @@ Last updated: 2026-07-30
 - Updates are manual only: Settings -> About -> Version. No automatic update check, download, or install.
 - The app should remain approachable through good defaults and navigation, not by removing advanced capability.
 - Do not implement multilingual UI. T1 uses the wording `启动后自动连接`, never Android boot auto-start.
-- Preserve unrelated worktree changes. The current T1 files below are intentionally uncommitted.
+- Preserve unrelated worktree changes. The current T2 files below are intentionally uncommitted.
 
 ## Committed Baseline
 
-### T0 settings
+### T0-T1 settings
 
-The `dd89dbf` baseline already includes:
+The `13383af` baseline includes the T0 features below plus the accepted T1 settings:
 
 - Settings redesign into category pages.
 - Auto reconnect with explicit user-intent handling and retry backoff.
@@ -32,6 +32,8 @@ The `dd89dbf` baseline already includes:
 - ABI-aware APK selection: device ABI is read on Android and the matching release APK is preferred over universal.
 - Subscription traffic/expiry fields are rendered when `Subscription-Userinfo` reaches `Profile.userInfo`.
 - Atomic latency-test result behavior was committed earlier in `262a424`.
+- Startup auto-connect, per-app proxy, dynamic notification, system HTTP proxy,
+  subscription update policy, and settings backup/restore.
 
 Key files:
 
@@ -41,65 +43,64 @@ Key files:
 - `android/app/src/main/kotlin/com/flsing/flsing/MainActivity.kt`
 - `docs/Settings-Roadmap.md`
 
-## Current Uncommitted Work: T1 Settings
+## Current Uncommitted Work: T2 Phase 1
 
 ### Implemented behavior
 
-1. Startup auto-connect
-   - `AppSettings.autoConnectOnLaunch` defaults to false.
-   - `AppSettings.connectionRequested` records whether the user last kept the VPN connected.
-   - At app initialization, auto-connect runs only if both flags are true and an active subscription exists.
-   - Manual disconnect and a VPN-permission denial clear the persisted connection intent.
-   - No `RECEIVE_BOOT_COMPLETED`, receiver, or device-boot behavior is used.
-   - Main code: `lib/providers/app_state.dart`.
+1. DNS override
+   - Three modes: preserve subscription, FLsing default, and manual DNS.
+   - Manual mode supports DoH/DoT, IPv4/IPv6 strategy, cache, independent
+     cache, FakeIP, and client subnet.
+   - The FLsing preset follows the bundled template and only adds geo rule-set
+     references when those tags exist in the active configuration.
 
-2. Per-app proxy
-   - Supports disabled, include-only, and exclude modes.
-   - Uses `flutter_sing_box`'s `CsSettingsStorage`, which the plugin's Android `VPNService` reads when it recreates the TUN interface.
-   - A third-level selector lists launchable installed apps, searches name/package, and hides system apps by default.
-   - Saving reloads VPN when connected; otherwise it applies on the next connection.
-   - New Dart service: `lib/data/services/per_app_proxy_service.dart`.
-   - Android package query bridge: `MainActivity.kt`, channel `flsing/device`.
-   - `android.permission.QUERY_ALL_PACKAGES` was added because a complete picker needs package visibility. This should be reviewed against the target distribution store's policy before public release.
+2. TUN override
+   - Optional override for MTU, stack, auto/strict route, sniffing, destination
+     override, IPv4/IPv6 interface addresses, and excluded routes.
+   - Override is disabled by default, preserving every subscription's TUN
+     settings until the user opts in.
 
-3. System HTTP proxy and dynamic notification
-   - `lib/data/services/platform_settings_service.dart` stores plugin-recognized MMKV keys in `cs_settings`.
-   - System HTTP proxy is enabled only if the active TUN config already provides `platform.http_proxy.server` and `server_port`; otherwise UI reports incompatibility.
-   - `SingBoxService.setSystemHttpProxyEnabled()` patches the current config and then `AppState` reloads VPN.
-   - Dynamic notification enables/disables the plugin's `dynamic_notification` setting, requesting Android 13+ notification permission before enabling.
-   - `POST_NOTIFICATIONS` was added to the manifest.
+3. Safe configuration pipeline
+   - `MainActivity.kt` exposes `Libbox.checkConfig` on
+     `flsing/configuration`; the app module pins the same libbox 1.13.14 used
+     by `flutter_sing_box` so Kotlin can compile the bridge.
+   - `SingBoxService` builds a candidate from the subscription source and local
+     settings, validates it with the real core, then replaces `using_config`
+     through temporary and backup files.
+   - Interrupted replacement is recovered during initialization. Advanced
+     settings are persisted only after candidate validation succeeds.
 
-4. Subscription update policy
-   - Added Wi-Fi-only auto updates and 0-3 extra retries for automatic refreshes.
-   - Manual refresh is never Wi-Fi restricted and does not add retry delay.
-   - Automatic refresh records a concise last-status message in `AppSettings.lastSubscriptionUpdateError`.
-   - A successful refresh reloads the running active VPN config.
-
-5. Settings backup and restore
-   - Export/import is in Settings -> Privacy and Data.
-   - The JSON includes app preferences, platform switches, and per-app package selections.
-   - It deliberately excludes subscription URLs, node configuration, profile data, update APK cache, and transient errors.
-   - Restore shows a confirmation, re-applies the config patch, updates theme immediately, and reloads a connected VPN.
-   - New service: `lib/data/services/settings_backup_service.dart`.
+4. UI and backup
+   - Settings has a separate Advanced Network page with DNS and TUN third-level
+     forms, per-section reset, and explicit reload/next-connect status.
+   - Existing schema-v1 backups now include the advanced network object while
+     remaining compatible with older backups that omit it.
 
 ### Current changed files
 
-- `android/app/src/main/AndroidManifest.xml`
+- `android/app/build.gradle.kts`
 - `android/app/src/main/kotlin/com/flsing/flsing/MainActivity.kt`
 - `docs/Settings-Roadmap.md`
+- `docs/Codex-Handoff.md`
+- `lib/data/services/advanced_network_config_service.dart` (new)
+- `lib/data/services/advanced_network_settings.dart` (new)
 - `lib/data/services/app_settings.dart`
-- `lib/data/services/device_service.dart`
-- `lib/data/services/per_app_proxy_service.dart` (new)
-- `lib/data/services/platform_settings_service.dart` (new)
-- `lib/data/services/settings_backup_service.dart` (new)
+- `lib/data/services/settings_backup_service.dart`
 - `lib/data/services/sing_box_service.dart`
 - `lib/providers/app_state.dart`
+- `lib/ui/pages/advanced_network_page.dart` (new)
 - `lib/ui/pages/settings_page.dart`
+- `test/advanced_network_config_service_test.dart` (new)
 
 ## Important Caveats
 
-- T1 has only passed `flutter analyze`; Android Kotlin and actual VPN behavior have not been built or exercised on a device because the user asked not to build locally.
-- The package picker relies on `QUERY_ALL_PACKAGES`. It should be verified on an Android device and reviewed for distribution-policy compliance.
+- T2 phase 1 has not been Gradle-compiled or exercised on Android because local
+  APK builds still require explicit permission. The Dart patcher is unit-tested,
+  but the native `Libbox.checkConfig` channel needs device verification.
+- `independent_cache`, inbound `sniff`, and `sniff_override_destination` are
+  deprecated by newer sing-box schemas. They remain supported by the pinned
+  1.13.14 core and are protected by runtime core validation; revisit them when
+  upgrading libbox.
 - `flutter_sing_box` v1.1.4 has `builder.allowBypass()` commented out in its Android `VPNService`. Do not expose a VPN bypass switch: it will not work. The roadmap has been corrected accordingly.
 - System HTTP proxy is configuration-dependent. The bundled template supports it (`tun.platform.http_proxy` plus a local mixed inbound), but arbitrary imported configs may not.
 - `serviceReload()` causes a real plugin service restart. Settings pages correctly describe the short VPN interruption.
@@ -117,37 +118,35 @@ Key files:
 `docs/Settings-Roadmap.md` is the authoritative T0-T3 plan.
 
 - T0: complete in the committed baseline.
-- T1: all currently real plugin-backed items are now implemented in the uncommitted work above. VPN bypass remains a plugin dependency, not an app UI item.
-- T2 next: DNS presets/overrides, full DNS rules, TUN parameters, route rules, URL-test tuning, log/cache controls, configuration overrides, and a manual update channel selector.
+- T1: accepted and committed in `13383af`. VPN bypass remains a plugin dependency, not an app UI item.
+- T2 phase 1: DNS/TUN overrides and the validated local override pipeline are implemented in the current worktree.
+- T2 next: route rules, complex DNS/response rules, URL-test tuning, log/cache controls, a manual update channel selector, and core maintenance.
 - T3: root redirect, local proxy-service mode, transport tuning, Clash API, raw config editor, memory controls, and Shizuku.
 
 ## Verification Already Run
 
-After the current T1 changes:
+After the current T2 phase-1 changes:
 
 ```powershell
 flutter analyze
-flutter test test/app_update_service_test.dart
+flutter test
 git diff --check
 ```
 
 Results:
 
 - `flutter analyze`: no issues.
-- Update-service test file: 8 tests passed.
+- Full test suite: 19 tests passed (including 8 new advanced-network tests).
 - `git diff --check`: no whitespace errors.
 
-No APK build, Gradle compilation, installation, commit, push, release, or tag operation was performed after the T1 edits.
+No APK build, Gradle compilation, installation, commit, push, release, or tag operation was performed after the T2 edits.
 
 ## Suggested Continuation
 
-1. Review the T1 diff and, when authorized, build/install a device APK for focused verification:
-   - startup auto-connect after a user-initiated connection;
-   - manual disconnect must prevent relaunch auto-connect;
-   - per-app include/exclude behavior after VPN reload;
-   - notification permission denial path;
-   - HTTP proxy on both bundled and external configs;
-   - Wi-Fi-only subscription behavior and backup round-trip.
-2. Resolve the subscription usage/expiry header behavior only with sanitized captured response metadata.
-3. Start T2 with DNS settings and TUN parameters only after the T1 device checks pass.
-
+1. Review the T2 phase-1 diff and, when authorized, build/install a device APK
+   to verify FLsing/default/manual DNS, invalid DNS rejection, all three TUN
+   stacks, route exclusions, connected reload, reset, and backup round-trip.
+2. Implement route rules and complex DNS rules on top of the validated patch
+   pipeline after phase-1 device checks pass.
+3. Resolve subscription usage/expiry only with sanitized captured response
+   metadata; do not add automatic User-Agent spoofing.

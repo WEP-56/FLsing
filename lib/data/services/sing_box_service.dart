@@ -6,18 +6,31 @@ import 'package:flutter_sing_box/flutter_sing_box.dart';
 import 'package:http/http.dart' as http;
 import 'package:mmkv/mmkv.dart';
 
+import 'advanced_network_config_service.dart';
+import 'advanced_network_settings.dart';
 import 'app_settings.dart';
 import 'platform_settings_service.dart';
 import 'rule_set_service.dart';
 import 'subscription_parser.dart';
 
 class SingBoxService {
-  SingBoxService({FlutterSingBox? client})
-    : _client = client ?? FlutterSingBox();
+  SingBoxService({
+    FlutterSingBox? client,
+    ConfigurationValidator? configurationValidator,
+    PlatformSettingsService? platformSettings,
+  }) : _client = client ?? FlutterSingBox(),
+       _configurationValidator =
+           configurationValidator ?? PlatformConfigurationValidator(),
+       _platformSettings = platformSettings;
 
   final FlutterSingBox _client;
+  final ConfigurationValidator _configurationValidator;
+  final AdvancedNetworkConfigService _advancedNetwork =
+      const AdvancedNetworkConfigService();
   final RuleSetService ruleSets = RuleSetService();
-  final PlatformSettingsService platformSettings = PlatformSettingsService();
+  PlatformSettingsService? _platformSettings;
+  PlatformSettingsService get platformSettings =>
+      _platformSettings ??= PlatformSettingsService();
   bool _initialized = false;
 
   Stream<ProxyState> get proxyStateStream => _client.proxyStateStream;
@@ -35,6 +48,7 @@ class SingBoxService {
     // native 侧从 MMKV 读 using_config 目录且没有兜底（读到空字符串会报
     // EmptyConfiguration），这里把 Dart 侧的兜底目录显式写回去。
     final usingConfig = await ProfileStorage().getUsingConfig();
+    await _recoverUsingConfig(usingConfig);
     ProfileStorage().setUsingConfig(usingConfig.parent.path);
     await ruleSets.ensureInstalled();
     // 已存在的 using_config 也补丁一次（本地规则集 + 默认模式）。
@@ -183,6 +197,13 @@ class SingBoxService {
     await _patchUsingConfig();
   }
 
+  Future<void> updateAdvancedNetworkSettings(
+    AdvancedNetworkSettings settings,
+  ) async {
+    await _patchUsingConfig(advancedSettingsOverride: settings);
+    AppSettings().advancedNetworkSettings = settings;
+  }
+
   /// Enables Android's system HTTP proxy only for configurations which expose
   /// a local HTTP inbound through the TUN platform settings.
   Future<bool> setSystemHttpProxyEnabled(bool enabled) async {
@@ -203,22 +224,31 @@ class SingBoxService {
   /// - 未识别的远程规则集下载改走代理；
   /// - 写入持久化的默认代理模式；
   /// - urltest 出站统一改用设置中的测速链接。
-  Future<bool> _patchUsingConfig({bool? systemHttpProxyOverride}) async {
+  Future<bool> _patchUsingConfig({
+    bool? systemHttpProxyOverride,
+    AdvancedNetworkSettings? advancedSettingsOverride,
+  }) async {
     final file = await ProfileStorage().getUsingConfig();
     if (!await file.exists()) return false;
     final dynamic config = jsonDecode(await file.readAsString());
     if (config is! Map<String, dynamic>) return false;
 
+    final patchedConfig = _advancedNetwork.apply(
+      config,
+      advancedSettingsOverride ?? AppSettings().advancedNetworkSettings,
+    );
+
     final experimental =
-        (config['experimental'] as Map<String, dynamic>?) ?? {};
+        (patchedConfig['experimental'] as Map<String, dynamic>?) ?? {};
     final clashApi = (experimental['clash_api'] as Map<String, dynamic>?) ?? {};
     clashApi['default_mode'] = preferredMode;
     experimental['clash_api'] = clashApi;
-    config['experimental'] = experimental;
+    patchedConfig['experimental'] = experimental;
 
-    if (config['outbounds'] is List) {
+    if (patchedConfig['outbounds'] is List) {
       for (final outbound
-          in (config['outbounds'] as List).whereType<Map<String, dynamic>>()) {
+          in (patchedConfig['outbounds'] as List)
+              .whereType<Map<String, dynamic>>()) {
         if (outbound['type'] == OutboundType.urltest) {
           outbound['url'] = AppSettings().testUrl;
         }
@@ -226,7 +256,7 @@ class SingBoxService {
     }
 
     var supportsSystemHttpProxy = false;
-    final inbounds = config['inbounds'];
+    final inbounds = patchedConfig['inbounds'];
     if (inbounds is List) {
       for (final inbound in inbounds.whereType<Map<String, dynamic>>()) {
         if (inbound['type'] != 'tun') continue;
@@ -248,7 +278,7 @@ class SingBoxService {
       }
     }
 
-    final route = config['route'];
+    final route = patchedConfig['route'];
     if (route is Map<String, dynamic> && route['rule_set'] is List) {
       for (final ruleSet
           in (route['rule_set'] as List).whereType<Map<String, dynamic>>()) {
@@ -265,8 +295,39 @@ class SingBoxService {
         }
       }
     }
-    await file.writeAsString(jsonEncode(config));
+    final encoded = jsonEncode(patchedConfig);
+    await _configurationValidator.validate(encoded);
+    await _writeUsingConfigAtomically(file, encoded);
     return supportsSystemHttpProxy;
+  }
+
+  Future<void> _recoverUsingConfig(io.File file) async {
+    final backup = io.File('${file.path}.flsing.bak');
+    final temporary = io.File('${file.path}.flsing.tmp');
+    if (!await file.exists() && await backup.exists()) {
+      await backup.rename(file.path);
+    }
+    if (await temporary.exists()) await temporary.delete();
+    if (await file.exists() && await backup.exists()) await backup.delete();
+  }
+
+  Future<void> _writeUsingConfigAtomically(io.File file, String content) async {
+    final backup = io.File('${file.path}.flsing.bak');
+    final temporary = io.File('${file.path}.flsing.tmp');
+    if (await temporary.exists()) await temporary.delete();
+    if (await backup.exists()) await backup.delete();
+    await temporary.writeAsString(content, flush: true);
+    await file.rename(backup.path);
+    try {
+      await temporary.rename(file.path);
+      await backup.delete();
+    } catch (_) {
+      if (await file.exists()) await file.delete();
+      if (await backup.exists()) await backup.rename(file.path);
+      rethrow;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
   }
 
   Future<http.Response> _fetchSubscription(Uri url) async {

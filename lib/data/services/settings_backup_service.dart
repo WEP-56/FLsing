@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'advanced_network_config_service.dart';
+import 'advanced_network_settings.dart';
 import 'app_settings.dart';
 import 'per_app_proxy_service.dart';
 import 'platform_settings_service.dart';
@@ -26,6 +28,7 @@ class SettingsBackupService {
       'latencyTestMethod': _settings.latencyTestMethod,
       'themeMode': _settings.themeMode,
       'testUrl': _settings.testUrl,
+      'advancedNetwork': _settings.advancedNetworkSettings.toJson(),
     },
     'platform': {
       'systemHttpProxyEnabled': _platform.systemHttpProxyEnabled,
@@ -45,6 +48,13 @@ class SettingsBackupService {
     final platform = _map(decoded['platform']);
     if (settings == null || platform == null) {
       throw const SettingsBackupException('设置备份文件不完整');
+    }
+    final advancedNetworkJson = _map(settings['advancedNetwork']);
+    final advancedNetwork = advancedNetworkJson == null
+        ? null
+        : AdvancedNetworkSettings.fromJson(advancedNetworkJson);
+    if (advancedNetwork != null) {
+      const AdvancedNetworkConfigService().validateSettings(advancedNetwork);
     }
 
     _setString(settings, 'clashMode', (value) => _settings.clashMode = value);
@@ -104,7 +114,10 @@ class SettingsBackupService {
         const <String>[];
     if (mode != null) _perAppProxy.save(mode: mode, packages: packages);
 
-    return SettingsRestoreResult(themeMode: _settings.themeMode);
+    return SettingsRestoreResult(
+      themeMode: _settings.themeMode,
+      advancedNetworkSettings: advancedNetwork,
+    );
   }
 
   Map<String, dynamic>? _map(Object? value) => value is Map<String, dynamic>
@@ -149,8 +162,12 @@ class SettingsBackupService {
 }
 
 class SettingsRestoreResult {
-  const SettingsRestoreResult({required this.themeMode});
+  const SettingsRestoreResult({
+    required this.themeMode,
+    this.advancedNetworkSettings,
+  });
   final String themeMode;
+  final AdvancedNetworkSettings? advancedNetworkSettings;
 }
 
 class SettingsBackupException implements Exception {

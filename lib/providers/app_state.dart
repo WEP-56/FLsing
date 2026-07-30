@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_sing_box/flutter_sing_box.dart';
 
+import '../data/services/advanced_network_settings.dart';
 import '../data/services/app_settings.dart';
 import '../data/services/device_service.dart';
 import '../data/services/ip_service.dart';
@@ -320,6 +322,30 @@ class AppState extends ChangeNotifier {
     } catch (error) {
       _feedback = '应用设置失败：$error';
       notifyListeners();
+    }
+  }
+
+  Future<bool> saveAdvancedNetworkSettings(
+    AdvancedNetworkSettings settings,
+  ) async {
+    try {
+      await _service.updateAdvancedNetworkSettings(settings);
+      if (isConnected) {
+        try {
+          await _service.reloadService();
+          _feedback = '高级网络设置已保存，VPN 正在重载';
+        } catch (error) {
+          _feedback = '高级网络设置已保存，但 VPN 重载失败：$error';
+        }
+      } else {
+        _feedback = '高级网络设置已保存，将在下次连接后生效';
+      }
+      notifyListeners();
+      return true;
+    } catch (error) {
+      _feedback = '高级网络设置未保存：${_configurationError(error)}';
+      notifyListeners();
+      return false;
     }
   }
 
@@ -994,6 +1020,11 @@ class AppState extends ChangeNotifier {
     final text = error.toString();
     if (text.contains('VPN_PERMISSION_DENIED')) return 'VPN 授权被拒绝';
     return '连接失败：$text';
+  }
+
+  String _configurationError(Object error) {
+    if (error is PlatformException) return error.message ?? error.code;
+    return error.toString();
   }
 
   bool _canRetryConnectionError(Object error) =>

@@ -65,6 +65,8 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    // Keep aligned with flutter_sing_box; needed for the config-check bridge.
+    implementation("com.github.singbox-android:libbox:1.13.14")
     implementation("com.tencent:mmkv:2.4.0")
 }
 

@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_sing_box/flutter_sing_box.dart';
+
+import 'advanced_network_settings.dart';
 
 /// 应用自身的轻量设置存储（MMKV），与插件的 cs_profile / cs_settings 隔离。
 class AppSettings {
@@ -88,6 +92,22 @@ class AppSettings {
   }
 
   set testUrl(String value) => _store.setString(_Keys.testUrl, value.trim());
+
+  AdvancedNetworkSettings get advancedNetworkSettings {
+    final raw = _store.getString(_Keys.advancedNetworkSettings);
+    if (raw == null || raw.isEmpty) return const AdvancedNetworkSettings();
+    try {
+      final value = jsonDecode(raw);
+      return value is Map<String, dynamic>
+          ? AdvancedNetworkSettings.fromJson(value)
+          : const AdvancedNetworkSettings();
+    } catch (_) {
+      return const AdvancedNetworkSettings();
+    }
+  }
+
+  set advancedNetworkSettings(AdvancedNetworkSettings value) => _store
+      .setString(_Keys.advancedNetworkSettings, jsonEncode(value.toJson()));
 }
 
 class ThemeModeOption {
@@ -117,4 +137,5 @@ class _Keys {
   static const latencyTestMethod = 'latency_test_method';
   static const themeMode = 'theme_mode';
   static const testUrl = 'test_url';
+  static const advancedNetworkSettings = 'advanced_network_settings';
 }

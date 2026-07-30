@@ -16,6 +16,7 @@ import '../../data/services/settings_backup_service.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_state.dart';
 import '../../providers/theme_provider.dart';
+import 'advanced_network_page.dart';
 import '../widgets/app_surfaces.dart';
 import '../widgets/flsing_sheets.dart' show confirmDestructive;
 
@@ -113,6 +114,12 @@ class _SettingsHome extends StatelessWidget {
           section: _SettingsSection.advanced,
         ),
         _CategoryTile(
+          icon: Icons.hub_outlined,
+          title: '高级网络',
+          subtitle: 'DNS 与 TUN 参数',
+          pageBuilder: (_) => const AdvancedNetworkPage(),
+        ),
+        _CategoryTile(
           icon: Icons.monitor_heart_outlined,
           title: '诊断',
           subtitle: state.lastError == null ? '连接状态与日志' : '发现最近错误',
@@ -135,13 +142,15 @@ class _CategoryTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.section,
-  });
+    this.section,
+    this.pageBuilder,
+  }) : assert(section != null || pageBuilder != null);
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final _SettingsSection section;
+  final _SettingsSection? section;
+  final WidgetBuilder? pageBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -173,7 +182,8 @@ class _CategoryTile extends StatelessWidget {
           trailing: Icon(Icons.chevron_right, color: c.text4),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => _SettingsDetailPage(section: section),
+              builder:
+                  pageBuilder ?? (_) => _SettingsDetailPage(section: section!),
             ),
           ),
         ),
@@ -793,8 +803,18 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
     try {
       final result = await _settingsBackupService.restore(File(path));
       themeProvider.setMode(_themeModeFromSetting(result.themeMode));
-      await appState.applySettingsPatch();
-      await appState.reloadVpnForSettings();
+      final advancedNetwork = result.advancedNetworkSettings;
+      if (advancedNetwork != null) {
+        final saved = await appState.saveAdvancedNetworkSettings(
+          advancedNetwork,
+        );
+        if (!saved) {
+          throw StateError(appState.takeFeedback() ?? '高级网络设置校验失败');
+        }
+      } else {
+        await appState.applySettingsPatch();
+        await appState.reloadVpnForSettings();
+      }
       if (mounted) showAppMessage('设置已恢复');
     } catch (error) {
       if (mounted) showAppMessage('恢复设置失败：$error');
