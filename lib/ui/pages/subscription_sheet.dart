@@ -245,6 +245,30 @@ class _SubscriptionTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 12, color: c.text4),
                     ),
+                    if (item.usedBytes != null || item.totalBytes != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _usageLabel(item),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: c.text3,
+                          fontFeatures: kTabularFigures,
+                        ),
+                      ),
+                    ],
+                    if (item.expireAt != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _expiryLabel(item.expireAt!),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: item.expireAt!.isBefore(DateTime.now())
+                              ? c.danger
+                              : c.text4,
+                          fontFeatures: kTabularFigures,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Text(
                       '更新时间：${formatDateTime(item.updatedAt)}',
@@ -273,6 +297,37 @@ class _SubscriptionTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _usageLabel(SubscriptionItem item) {
+    final used = item.usedBytes;
+    final total = item.totalBytes;
+    if (total != null && total > 0) {
+      final percent = used == null ? null : (used / total * 100).clamp(0, 999);
+      final progress = percent == null
+          ? ''
+          : ' (${percent.toStringAsFixed(1)}%)';
+      return '已用 ${_formatBytes(used ?? 0)} / ${_formatBytes(total)}$progress';
+    }
+    return '上行 ${_formatBytes(item.uploadBytes ?? 0)} · 下行 ${_formatBytes(item.downloadBytes ?? 0)}';
+  }
+
+  String _expiryLabel(DateTime expiry) {
+    final date =
+        '${expiry.year}-${expiry.month.toString().padLeft(2, '0')}-${expiry.day.toString().padLeft(2, '0')}';
+    return expiry.isBefore(DateTime.now()) ? '已于 $date 到期' : '到期：$date';
+  }
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    final digits = value >= 100 || unit == 0 ? 0 : 1;
+    return '${value.toStringAsFixed(digits)} ${units[unit]}';
   }
 
   void _showMenu(BuildContext context) {

@@ -45,7 +45,7 @@ class AppUpdateService {
     if (tag == null || assets is! List) {
       throw const UpdateException('Release 缺少版本号或安装包');
     }
-    final apk = _selectApk(assets);
+    final apk = _selectApk(assets, await _supportedAbis());
     if (apk == null) {
       throw const UpdateException('最新 Release 中没有可下载的 APK');
     }
@@ -123,7 +123,22 @@ class AppUpdateService {
     await _installerChannel.invokeMethod<void>('installApk', apk.path);
   }
 
-  static (String, Uri, int)? _selectApk(List<dynamic> assets) {
+  Future<List<String>> _supportedAbis() async {
+    if (!Platform.isAndroid) return const [];
+    try {
+      return await _installerChannel.invokeListMethod<String>(
+            'getSupportedAbis',
+          ) ??
+          const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  static (String, Uri, int)? _selectApk(
+    List<dynamic> assets,
+    List<String> supportedAbis,
+  ) {
     final apks = <(String, Uri, int)>[];
     for (final asset in assets) {
       if (asset is! Map<String, dynamic>) continue;
@@ -139,10 +154,40 @@ class AppUpdateService {
       apks.add((name, uri, (asset['size'] as num?)?.toInt() ?? 0));
     }
     if (apks.isEmpty) return null;
-    return apks.firstWhere(
-      (asset) => asset.$1.toLowerCase().contains('universal'),
-      orElse: () => apks.first,
+    final selectedName = selectApkNameForAbis(
+      apks.map((asset) => asset.$1),
+      supportedAbis,
     );
+    if (selectedName == null) return null;
+    return apks.firstWhere((asset) => asset.$1 == selectedName);
+  }
+
+  static String? selectApkNameForAbis(
+    Iterable<String> apkNames,
+    Iterable<String> supportedAbis,
+  ) {
+    final names = apkNames
+        .where((name) => name.toLowerCase().endsWith('.apk'))
+        .toList();
+    for (final abi in supportedAbis) {
+      final escapedAbi = RegExp.escape(abi.toLowerCase());
+      final suffix = RegExp(
+        '(?:^|[-_.])$escapedAbi\\.apk\$',
+        caseSensitive: false,
+      );
+      for (final name in names) {
+        if (suffix.hasMatch(name)) return name;
+      }
+    }
+    for (final name in names) {
+      if (RegExp(
+        r'(?:^|[-_.])universal\.apk$',
+        caseSensitive: false,
+      ).hasMatch(name)) {
+        return name;
+      }
+    }
+    return names.length == 1 ? names.single : null;
   }
 
   static String normalizeVersion(String value) {

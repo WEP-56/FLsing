@@ -55,6 +55,10 @@ class SubscriptionItem {
     required this.url,
     required this.updatedAt,
     required this.nodeCount,
+    this.uploadBytes,
+    this.downloadBytes,
+    this.totalBytes,
+    this.expireAt,
   });
 
   final String id;
@@ -62,6 +66,14 @@ class SubscriptionItem {
   final String url;
   final DateTime updatedAt;
   final int nodeCount;
+  final int? uploadBytes;
+  final int? downloadBytes;
+  final int? totalBytes;
+  final DateTime? expireAt;
+
+  int? get usedBytes => uploadBytes == null && downloadBytes == null
+      ? null
+      : (uploadBytes ?? 0) + (downloadBytes ?? 0);
 
   SubscriptionItem copyWith({String? name, String? url, DateTime? updatedAt}) {
     return SubscriptionItem(
@@ -70,6 +82,10 @@ class SubscriptionItem {
       url: url ?? this.url,
       updatedAt: updatedAt ?? this.updatedAt,
       nodeCount: nodeCount,
+      uploadBytes: uploadBytes,
+      downloadBytes: downloadBytes,
+      totalBytes: totalBytes,
+      expireAt: expireAt,
     );
   }
 }

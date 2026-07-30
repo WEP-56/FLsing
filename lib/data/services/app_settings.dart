@@ -19,6 +19,11 @@ class AppSettings {
   set autoUpdateSubscriptions(bool value) =>
       _store.setBool(_Keys.autoUpdateSubscriptions, value);
 
+  /// VPN 因内核或系统异常停止时是否自动重连。
+  bool get autoReconnect =>
+      _store.getBool(_Keys.autoReconnect, defaultValue: true);
+  set autoReconnect(bool value) => _store.setBool(_Keys.autoReconnect, value);
+
   /// 订阅视为过期的小时数。
   int get subscriptionStaleHours =>
       _store.getInt(_Keys.subscriptionStaleHours, defaultValue: 24);
@@ -27,7 +32,8 @@ class AppSettings {
 
   /// 规则库最近一次更新时间（毫秒时间戳，0 表示仍是内置版本）。
   int get ruleSetUpdatedAt => _store.getInt(_Keys.ruleSetUpdatedAt);
-  set ruleSetUpdatedAt(int value) => _store.setInt(_Keys.ruleSetUpdatedAt, value);
+  set ruleSetUpdatedAt(int value) =>
+      _store.setInt(_Keys.ruleSetUpdatedAt, value);
 
   /// 延迟测速方法：smart（未连接直连、连接后走内核）/ direct（TCP 直连）/ proxy（内核实测）。
   String get latencyTestMethod =>
@@ -36,7 +42,8 @@ class AppSettings {
       _store.setString(_Keys.latencyTestMethod, value);
 
   /// 主题模式：system / light / dark。
-  String get themeMode => _store.getString(_Keys.themeMode) ?? ThemeModeOption.system;
+  String get themeMode =>
+      _store.getString(_Keys.themeMode) ?? ThemeModeOption.system;
   set themeMode(String value) => _store.setString(_Keys.themeMode, value);
 
   /// 内核 urltest 测速链接。
@@ -64,6 +71,7 @@ class LatencyTestMethod {
 class _Keys {
   static const clashMode = 'clash_mode';
   static const autoUpdateSubscriptions = 'auto_update_subscriptions';
+  static const autoReconnect = 'auto_reconnect';
   static const subscriptionStaleHours = 'subscription_stale_hours';
   static const ruleSetUpdatedAt = 'rule_set_updated_at';
   static const latencyTestMethod = 'latency_test_method';

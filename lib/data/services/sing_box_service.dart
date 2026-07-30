@@ -21,6 +21,7 @@ class SingBoxService {
   Stream<ProxyState> get proxyStateStream => _client.proxyStateStream;
   Stream<List<ClientGroup>> get groupStream => _client.groupStream;
   Stream<ClientClashMode> get clashModeStream => _client.clashModeStream;
+  Stream<List<ClientLog>> get logStream => _client.logStream;
 
   List<Profile> get profiles => ProfileStorage().getProfiles();
   Profile? get selectedProfile => ProfileStorage().getSelectedProfile();

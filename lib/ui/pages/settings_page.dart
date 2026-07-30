@@ -1,33 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_messenger.dart';
 import '../../core/theme/flsing_theme.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
+import '../../data/services/device_service.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_state.dart';
 import '../../providers/theme_provider.dart';
 import '../widgets/app_surfaces.dart';
 
-class SettingsPage extends StatefulWidget {
+class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends State<SettingsPage> {
-  bool _updatingRuleSets = false;
-  final _updateService = AppUpdateService();
-  late final Future<String> _appVersion = _updateService.currentVersion();
-
-  @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final themeProvider = context.watch<ThemeProvider>();
-    final settings = AppSettings();
-    final c = FlsingColors.of(context);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -51,187 +40,208 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        const _SectionHeader('外观'),
-                        _SettingsGroup(
-                          children: [
-                            for (final option in const [
-                              (ThemeMode.system, '跟随系统', '与系统深浅模式保持一致'),
-                              (ThemeMode.light, '浅色', '暖调纸白'),
-                              (ThemeMode.dark, '深色', '纯黑背景，OLED 友好'),
-                            ])
-                              _CheckTile(
-                                label: option.$2,
-                                subtitle: option.$3,
-                                active: themeProvider.mode == option.$1,
-                                onTap: () => themeProvider.setMode(option.$1),
-                              ),
-                          ],
-                        ),
-                        const _SectionHeader('代理方式'),
-                        _SettingsGroup(
-                          children: [
-                            _ModeTile(
-                              label: '规则',
-                              subtitle: '国内直连，其余走代理',
-                              mode: ProxyMode.rule,
-                              current: state.mode,
-                            ),
-                            _ModeTile(
-                              label: '全局',
-                              subtitle: '全部流量走代理',
-                              mode: ProxyMode.global,
-                              current: state.mode,
-                            ),
-                            _ModeTile(
-                              label: '直连',
-                              subtitle: '全部流量不走代理',
-                              mode: ProxyMode.direct,
-                              current: state.mode,
-                            ),
-                          ],
-                        ),
-                        const _SectionHeader('测速'),
-                        _SettingsGroup(
-                          children: [
-                            _LatencyMethodTile(
-                              label: '智能',
-                              subtitle: '未连接时直连测试，连接后由内核实测',
-                              method: LatencyTestMethod.smart,
-                              onChanged: () => setState(() {}),
-                            ),
-                            _LatencyMethodTile(
-                              label: '直连',
-                              subtitle: '设备直接握手节点端口，快速且无需连接',
-                              method: LatencyTestMethod.direct,
-                              onChanged: () => setState(() {}),
-                            ),
-                            _LatencyMethodTile(
-                              label: '代理',
-                              subtitle: '通过代理实测真实延迟，需要先连接',
-                              method: LatencyTestMethod.proxy,
-                              onChanged: () => setState(() {}),
-                            ),
-                            ListTile(
-                              title: const Text('测试链接'),
-                              subtitle: Text(
-                                settings.testUrl,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: c.text4, fontSize: 13),
-                              ),
-                              trailing: Icon(
-                                Icons.edit_outlined,
-                                size: 18,
-                                color: c.text4,
-                              ),
-                              onTap: () => _editTestUrl(settings),
-                            ),
-                          ],
-                        ),
-                        const _SectionHeader('订阅'),
-                        _SettingsGroup(
-                          children: [
-                            SwitchListTile.adaptive(
-                              title: const Text('自动更新订阅'),
-                              subtitle: Text(
-                                '打开应用时刷新超过 ${settings.subscriptionStaleHours} 小时未更新的订阅',
-                                style: TextStyle(color: c.text4, fontSize: 13),
-                              ),
-                              value: settings.autoUpdateSubscriptions,
-                              onChanged: (value) => setState(
-                                () => settings.autoUpdateSubscriptions = value,
-                              ),
-                            ),
-                            ListTile(
-                              enabled: settings.autoUpdateSubscriptions,
-                              title: const Text('更新间隔'),
-                              trailing: Text(
-                                '${settings.subscriptionStaleHours} 小时',
-                                style: TextStyle(color: c.text4),
-                              ),
-                              onTap: () => _pickStaleHours(settings),
-                            ),
-                          ],
-                        ),
-                        const _SectionHeader('规则库'),
-                        _SettingsGroup(
-                          children: [
-                            ListTile(
-                              title: const Text('更新规则库'),
-                              subtitle: Text(
-                                _ruleSetSubtitle(settings),
-                                style: TextStyle(color: c.text4, fontSize: 13),
-                              ),
-                              trailing: _updatingRuleSets
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : Icon(
-                                      Icons.refresh,
-                                      size: 20,
-                                      color: c.text3,
-                                    ),
-                              onTap: _updatingRuleSets
-                                  ? null
-                                  : () => _updateRuleSets(state),
-                            ),
-                          ],
-                        ),
-                        const _SectionHeader('连接'),
-                        const _SettingsGroup(
-                          children: [
-                            _PlaceholderTile(title: '断线后自动重连'),
-                            _PlaceholderTile(title: '开机自动连接'),
-                          ],
-                        ),
-                        const _SectionHeader('高级'),
-                        const _SettingsGroup(
-                          children: [
-                            _PlaceholderTile(title: '分应用代理'),
-                            _PlaceholderTile(title: 'DNS 设置'),
-                            _PlaceholderTile(title: '日志查看'),
-                          ],
-                        ),
-                        const _SectionHeader('诊断'),
-                        _SettingsGroup(
-                          children: [
-                            _InfoTile(
-                              label: 'VPN 状态',
-                              value: _phaseLabel(state.phase),
-                            ),
-                            _InfoTile(
-                              label: 'sing-box 内核',
-                              future: state.isInitialized
-                                  ? state.singBoxVersion()
-                                  : null,
-                              value: state.isInitialized ? null : '未初始化',
-                            ),
-                          ],
-                        ),
-                        const _SectionHeader('关于'),
-                        _SettingsGroup(
-                          children: [
-                            const _InfoTile(label: '应用', value: 'FLsing'),
-                            _InfoTile(
-                              label: '版本',
-                              future: _appVersion,
-                              onTap: _checkForUpdates,
-                            ),
-                            const _InfoTile(label: '许可', value: 'MIT'),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
+                  const SizedBox(height: 18),
+                  const Expanded(child: _SettingsHome()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsHome extends StatelessWidget {
+  const _SettingsHome();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final settings = AppSettings();
+    return ListView(
+      children: [
+        _CategoryTile(
+          icon: Icons.link_rounded,
+          title: '连接',
+          subtitle: state.isConnected
+              ? '已连接'
+              : '自动重连 ${settings.autoReconnect ? '已开启' : '已关闭'}',
+          section: _SettingsSection.connection,
+        ),
+        _CategoryTile(
+          icon: Icons.route_outlined,
+          title: '代理方式',
+          subtitle: _modeName(state.mode),
+          section: _SettingsSection.proxy,
+        ),
+        _CategoryTile(
+          icon: Icons.layers_outlined,
+          title: '订阅与节点',
+          subtitle: settings.autoUpdateSubscriptions ? '自动更新已开启' : '自动更新已关闭',
+          section: _SettingsSection.subscription,
+        ),
+        _CategoryTile(
+          icon: Icons.palette_outlined,
+          title: '外观',
+          subtitle: _themeName(context.watch<ThemeProvider>().mode),
+          section: _SettingsSection.appearance,
+        ),
+        const _CategoryTile(
+          icon: Icons.battery_charging_full_outlined,
+          title: '后台与启动',
+          subtitle: '电池优化',
+          section: _SettingsSection.background,
+        ),
+        const _CategoryTile(
+          icon: Icons.privacy_tip_outlined,
+          title: '隐私与数据',
+          subtitle: '日志与本地数据',
+          section: _SettingsSection.privacy,
+        ),
+        const _CategoryTile(
+          icon: Icons.tune_rounded,
+          title: '高级设置',
+          subtitle: '测速与测试链接',
+          section: _SettingsSection.advanced,
+        ),
+        _CategoryTile(
+          icon: Icons.monitor_heart_outlined,
+          title: '诊断',
+          subtitle: state.lastError == null ? '连接状态与日志' : '发现最近错误',
+          section: _SettingsSection.diagnostics,
+        ),
+        const _CategoryTile(
+          icon: Icons.info_outline_rounded,
+          title: '关于',
+          subtitle: '版本与开源许可',
+          section: _SettingsSection.about,
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.section,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final _SettingsSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FlsingColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: c.surface1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: c.border1),
+        ),
+        child: ListTile(
+          minVerticalPadding: 12,
+          leading: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: c.surface3,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: c.text2),
+          ),
+          title: Text(title),
+          subtitle: Text(
+            subtitle,
+            style: TextStyle(color: c.text4, fontSize: 13),
+          ),
+          trailing: Icon(Icons.chevron_right, color: c.text4),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => _SettingsDetailPage(section: section),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _SettingsSection {
+  connection,
+  proxy,
+  subscription,
+  appearance,
+  background,
+  privacy,
+  advanced,
+  diagnostics,
+  about,
+}
+
+class _SettingsDetailPage extends StatefulWidget {
+  const _SettingsDetailPage({required this.section});
+
+  final _SettingsSection section;
+
+  @override
+  State<_SettingsDetailPage> createState() => _SettingsDetailPageState();
+}
+
+class _SettingsDetailPageState extends State<_SettingsDetailPage> {
+  final _deviceService = DeviceService();
+  final _updateService = AppUpdateService();
+  bool _updatingRuleSets = false;
+  bool? _batteryOptimizationIgnored;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.section == _SettingsSection.background) {
+      _loadBatteryStatus();
+    }
+  }
+
+  Future<void> _loadBatteryStatus() async {
+    final value = await _deviceService.isIgnoringBatteryOptimizations();
+    if (mounted) setState(() => _batteryOptimizationIgnored = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 660),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      CircleIconButton(
+                        icon: Icons.arrow_back,
+                        tooltip: '返回',
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        _title,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 16),
+                  Expanded(child: _content(context)),
                 ],
               ),
             ),
@@ -241,6 +251,348 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  String get _title => switch (widget.section) {
+    _SettingsSection.connection => '连接',
+    _SettingsSection.proxy => '代理方式',
+    _SettingsSection.subscription => '订阅与节点',
+    _SettingsSection.appearance => '外观',
+    _SettingsSection.background => '后台与启动',
+    _SettingsSection.privacy => '隐私与数据',
+    _SettingsSection.advanced => '高级设置',
+    _SettingsSection.diagnostics => '诊断',
+    _SettingsSection.about => '关于',
+  };
+
+  Widget _content(BuildContext context) => switch (widget.section) {
+    _SettingsSection.connection => _connection(context),
+    _SettingsSection.proxy => _proxy(context),
+    _SettingsSection.subscription => _subscription(context),
+    _SettingsSection.appearance => _appearance(context),
+    _SettingsSection.background => _background(context),
+    _SettingsSection.privacy => _privacy(context),
+    _SettingsSection.advanced => _advanced(context),
+    _SettingsSection.diagnostics => _diagnostics(context),
+    _SettingsSection.about => _about(context),
+  };
+
+  Widget _connection(BuildContext context) {
+    final state = context.watch<AppState>();
+    final settings = AppSettings();
+    return ListView(
+      children: [
+        _SectionLabel('连接可靠性'),
+        _SettingsGroup(
+          children: [
+            SwitchListTile.adaptive(
+              title: const Text('断线后自动重连'),
+              subtitle: Text('服务异常停止后自动恢复，手动断开不会重连', style: _subtle(context)),
+              value: settings.autoReconnect,
+              onChanged: state.setAutoReconnect,
+            ),
+            _InfoTile(label: '当前状态', value: _phaseName(state.phase)),
+            if (state.reconnectPending)
+              const _InfoTile(label: '重连任务', value: '等待下一次尝试'),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _proxy(BuildContext context) {
+    final state = context.watch<AppState>();
+    return ListView(
+      children: [
+        _SectionLabel('代理模式'),
+        _SettingsGroup(
+          children: [
+            for (final item in const [
+              (ProxyMode.rule, '规则', '国内直连，其余流量走代理'),
+              (ProxyMode.global, '全局', '全部流量走代理'),
+              (ProxyMode.direct, '直连', '全部流量不走代理'),
+            ])
+              _ChoiceTile(
+                label: item.$2,
+                subtitle: item.$3,
+                active: state.mode == item.$1,
+                onTap: () => context.read<AppState>().selectMode(item.$1),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _subscription(BuildContext context) {
+    final settings = AppSettings();
+    return ListView(
+      children: [
+        _SectionLabel('更新策略'),
+        _SettingsGroup(
+          children: [
+            SwitchListTile.adaptive(
+              title: const Text('自动更新订阅'),
+              subtitle: Text(
+                '打开应用时更新超过 ${settings.subscriptionStaleHours} 小时未刷新的订阅',
+                style: _subtle(context),
+              ),
+              value: settings.autoUpdateSubscriptions,
+              onChanged: (value) =>
+                  setState(() => settings.autoUpdateSubscriptions = value),
+            ),
+            ListTile(
+              enabled: settings.autoUpdateSubscriptions,
+              title: const Text('更新间隔'),
+              trailing: _TrailingValue('${settings.subscriptionStaleHours} 小时'),
+              onTap: () => _pickStaleHours(settings),
+            ),
+          ],
+        ),
+        _SectionLabel('规则库'),
+        _SettingsGroup(
+          children: [
+            ListTile(
+              title: const Text('更新规则库'),
+              subtitle: Text(
+                _ruleSetSubtitle(settings),
+                style: _subtle(context),
+              ),
+              trailing: _updatingRuleSets
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(Icons.refresh, color: FlsingColors.of(context).text3),
+              onTap: _updatingRuleSets ? null : _updateRuleSets,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _appearance(BuildContext context) {
+    final theme = context.watch<ThemeProvider>();
+    return ListView(
+      children: [
+        _SectionLabel('主题'),
+        _SettingsGroup(
+          children: [
+            for (final item in const [
+              (ThemeMode.system, '跟随系统', '与系统深浅模式保持一致'),
+              (ThemeMode.light, '浅色', '暖调纸白'),
+              (ThemeMode.dark, '深色', '纯黑背景，OLED 友好'),
+            ])
+              _ChoiceTile(
+                label: item.$2,
+                subtitle: item.$3,
+                active: theme.mode == item.$1,
+                onTap: () => theme.setMode(item.$1),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _background(BuildContext context) => ListView(
+    children: [
+      _SectionLabel('电池优化'),
+      _SettingsGroup(
+        children: [
+          ListTile(
+            title: const Text('忽略电池优化'),
+            subtitle: Text(
+              _batteryOptimizationIgnored == null
+                  ? '正在读取系统状态'
+                  : _batteryOptimizationIgnored!
+                  ? '已允许后台运行'
+                  : '系统可能在后台限制连接',
+              style: _subtle(context),
+            ),
+            trailing: Icon(
+              _batteryOptimizationIgnored == true
+                  ? Icons.check_circle_outline
+                  : Icons.open_in_new,
+              color: FlsingColors.of(context).text3,
+            ),
+            onTap: () async {
+              await _deviceService.requestIgnoreBatteryOptimizations();
+              await _loadBatteryStatus();
+            },
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _privacy(BuildContext context) {
+    final state = context.watch<AppState>();
+    return ListView(
+      children: [
+        _SectionLabel('本地数据'),
+        _SettingsGroup(
+          children: [
+            _InfoTile(label: '内存日志', value: '${state.logs.length} 条'),
+            ListTile(
+              title: const Text('清空内存日志'),
+              subtitle: Text('不会影响订阅、节点和连接配置', style: _subtle(context)),
+              trailing: Icon(
+                Icons.delete_outline,
+                color: FlsingColors.of(context).text3,
+              ),
+              onTap: state.logs.isEmpty
+                  ? null
+                  : () {
+                      state.clearLogs();
+                      showAppMessage('日志已清空');
+                    },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _advanced(BuildContext context) {
+    final settings = AppSettings();
+    return ListView(
+      children: [
+        _SectionLabel('测速'),
+        _SettingsGroup(
+          children: [
+            for (final item in const [
+              (LatencyTestMethod.smart, '智能', '未连接时直连，连接后由内核实测'),
+              (LatencyTestMethod.direct, '直连', '设备直接 TCP 握手节点端口'),
+              (LatencyTestMethod.proxy, '内核', '通过代理进行真实链路测速，需要先连接'),
+            ])
+              _ChoiceTile(
+                label: item.$2,
+                subtitle: item.$3,
+                active: settings.latencyTestMethod == item.$1,
+                onTap: () =>
+                    setState(() => settings.latencyTestMethod = item.$1),
+              ),
+            ListTile(
+              title: const Text('测试链接'),
+              subtitle: Text(
+                settings.testUrl,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _subtle(context),
+              ),
+              trailing: Icon(
+                Icons.edit_outlined,
+                color: FlsingColors.of(context).text3,
+              ),
+              onTap: () => _editTestUrl(settings),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _diagnostics(BuildContext context) {
+    final state = context.watch<AppState>();
+    return ListView(
+      children: [
+        _SectionLabel('连接快照'),
+        _SettingsGroup(
+          children: [
+            _InfoTile(label: 'VPN 状态', value: _phaseName(state.phase)),
+            _InfoTile(label: '出口 IP', value: state.ipInfo?.ip ?? '未获取'),
+            _InfoTile(label: '最近错误', value: state.lastError ?? '无'),
+            ListTile(
+              title: const Text('复制诊断信息'),
+              subtitle: Text('不包含订阅链接和节点凭据', style: _subtle(context)),
+              trailing: Icon(
+                Icons.copy_outlined,
+                color: FlsingColors.of(context).text3,
+              ),
+              onTap: () => _copyDiagnostics(share: false),
+            ),
+            ListTile(
+              title: const Text('分享诊断信息'),
+              subtitle: Text('以文本文件交给系统分享面板', style: _subtle(context)),
+              trailing: Icon(
+                Icons.ios_share_outlined,
+                color: FlsingColors.of(context).text3,
+              ),
+              onTap: () => _copyDiagnostics(share: true),
+            ),
+          ],
+        ),
+        _SectionLabel('日志'),
+        _SettingsGroup(
+          children: [
+            ListTile(
+              title: const Text('查看日志'),
+              subtitle: Text(
+                '${state.logs.length} 条，仅保留最近 600 条',
+                style: _subtle(context),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: FlsingColors.of(context).text4,
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const _LogsPage()),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _about(BuildContext context) => ListView(
+    children: [
+      const SizedBox(height: 18),
+      Center(
+        child: Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(
+            color: FlsingColors.of(context).surface2,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Center(
+        child: Text('FLsing', style: Theme.of(context).textTheme.titleLarge),
+      ),
+      const SizedBox(height: 24),
+      _SettingsGroup(
+        children: [
+          _InfoTile(label: '应用', value: 'FLsing'),
+          _InfoTile(
+            label: '版本',
+            future: _updateService.currentVersion(),
+            onTap: _checkForUpdates,
+          ),
+          ListTile(
+            title: const Text('开源许可'),
+            trailing: _TrailingValue('MIT'),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => const AlertDialog(
+                title: Text('MIT License'),
+                content: Text('FLsing 以 MIT License 开源发布。'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  TextStyle _subtle(BuildContext context) =>
+      TextStyle(color: FlsingColors.of(context).text4, fontSize: 13);
+
   String _ruleSetSubtitle(AppSettings settings) {
     final updatedAt = settings.ruleSetUpdatedAt;
     if (updatedAt == 0) return '当前为内置版本';
@@ -248,8 +600,9 @@ class _SettingsPageState extends State<SettingsPage> {
     return '上次更新：${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _updateRuleSets(AppState state) async {
+  Future<void> _updateRuleSets() async {
     setState(() => _updatingRuleSets = true);
+    final state = context.read<AppState>();
     await state.updateRuleSets();
     final message = state.takeFeedback();
     if (message != null) showAppMessage(message);
@@ -262,42 +615,43 @@ class _SettingsPageState extends State<SettingsPage> {
     builder: (_) => _UpdateDialog(service: _updateService),
   );
 
+  Future<void> _copyDiagnostics({required bool share}) async {
+    final report = await context.read<AppState>().buildDiagnosticReport();
+    if (share) {
+      await _deviceService.shareTextFile(
+        filename: 'flsing-diagnostic.txt',
+        content: report,
+      );
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: report));
+    showAppMessage('诊断信息已复制');
+  }
+
   Future<void> _editTestUrl(AppSettings settings) async {
     final controller = TextEditingController(text: settings.testUrl);
     final formKey = GlobalKey<FormState>();
+    final appState = context.read<AppState>();
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('测试链接'),
         content: Form(
           key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: controller,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: '延迟测试地址',
-                  hintText: AppSettings.defaultTestUrl,
-                ),
-                validator: (value) {
-                  final uri = Uri.tryParse(value?.trim() ?? '');
-                  return uri != null &&
-                          (uri.scheme == 'http' || uri.scheme == 'https')
-                      ? null
-                      : '请输入有效的 http(s) 链接';
-                },
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () => controller.text = AppSettings.defaultTestUrl,
-                  child: const Text('恢复默认'),
-                ),
-              ),
-            ],
+          child: TextFormField(
+            controller: controller,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: '延迟测试地址',
+              hintText: AppSettings.defaultTestUrl,
+            ),
+            validator: (value) {
+              final uri = Uri.tryParse(value?.trim() ?? '');
+              return uri != null &&
+                      (uri.scheme == 'http' || uri.scheme == 'https')
+                  ? null
+                  : '请输入有效的 http(s) 链接';
+            },
           ),
         ),
         actions: [
@@ -316,14 +670,12 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
-    if (saved == true) {
-      settings.testUrl = controller.text.trim();
-      if (!mounted) return;
-      await context.read<AppState>().applySettingsPatch();
-      if (mounted) {
-        setState(() {});
-        showAppMessage('测试链接已保存，重新连接后生效');
-      }
+    if (saved != true) return;
+    settings.testUrl = controller.text.trim();
+    await appState.applySettingsPatch();
+    if (mounted) {
+      setState(() {});
+      showAppMessage('测试链接已保存，重新连接后生效');
     }
   }
 
@@ -348,29 +700,103 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => settings.subscriptionStaleHours = selected);
     }
   }
-
-  String _phaseLabel(ConnectionPhase phase) => switch (phase) {
-    ConnectionPhase.connected => '已连接',
-    ConnectionPhase.connecting => '连接中',
-    ConnectionPhase.disconnecting => '断开中',
-    ConnectionPhase.disconnected => '未连接',
-  };
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
+class _LogsPage extends StatelessWidget {
+  const _LogsPage();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-      child: Text(
-        title,
-        style: TextStyle(color: FlsingColors.of(context).text4, fontSize: 13),
+    final state = context.watch<AppState>();
+    final c = FlsingColors.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  CircleIconButton(
+                    icon: Icons.arrow_back,
+                    tooltip: '返回',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('日志', style: Theme.of(context).textTheme.titleLarge),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '复制',
+                    icon: const Icon(Icons.copy_outlined),
+                    onPressed: state.logs.isEmpty
+                        ? null
+                        : () async {
+                            await Clipboard.setData(
+                              ClipboardData(
+                                text: state.buildSanitizedLogReport(),
+                              ),
+                            );
+                            showAppMessage('脱敏日志已复制');
+                          },
+                  ),
+                  IconButton(
+                    tooltip: '清空',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: state.logs.isEmpty ? null : state.clearLogs,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: state.logs.isEmpty
+                    ? Center(
+                        child: Text('暂无日志', style: TextStyle(color: c.text4)),
+                      )
+                    : Material(
+                        color: c.surface1,
+                        borderRadius: BorderRadius.circular(8),
+                        child: ListView.builder(
+                          itemCount: state.logs.length,
+                          itemBuilder: (_, index) {
+                            final log = state.logs[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 7,
+                              ),
+                              child: Text(
+                                '[${_logLevelName(log.level)}] ${state.sanitizedLogMessage(log.message)}',
+                                style: TextStyle(
+                                  color: c.text3,
+                                  fontSize: 12,
+                                  height: 1.35,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+    child: Text(
+      label,
+      style: TextStyle(color: FlsingColors.of(context).text4, fontSize: 13),
+    ),
+  );
 }
 
 class _SettingsGroup extends StatelessWidget {
@@ -383,7 +809,7 @@ class _SettingsGroup extends StatelessWidget {
     return Material(
       color: c.surface1,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(8),
         side: BorderSide(color: c.border1),
       ),
       clipBehavior: Clip.antiAlias,
@@ -392,97 +818,30 @@ class _SettingsGroup extends StatelessWidget {
   }
 }
 
-class _CheckTile extends StatelessWidget {
-  const _CheckTile({
+class _ChoiceTile extends StatelessWidget {
+  const _ChoiceTile({
     required this.label,
     required this.subtitle,
     required this.active,
     required this.onTap,
   });
-
   final String label;
   final String subtitle;
   final bool active;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final c = FlsingColors.of(context);
-    return ListTile(
-      title: Text(label),
-      subtitle: Text(subtitle, style: TextStyle(color: c.text4, fontSize: 13)),
-      trailing: active ? Icon(Icons.check, color: c.accent) : null,
-      onTap: active ? null : onTap,
-    );
-  }
-}
-
-class _ModeTile extends StatelessWidget {
-  const _ModeTile({
-    required this.label,
-    required this.subtitle,
-    required this.mode,
-    required this.current,
-  });
-
-  final String label;
-  final String subtitle;
-  final ProxyMode mode;
-  final ProxyMode current;
-
-  @override
-  Widget build(BuildContext context) {
-    return _CheckTile(
-      label: label,
-      subtitle: subtitle,
-      active: mode == current,
-      onTap: () => context.read<AppState>().selectMode(mode),
-    );
-  }
-}
-
-class _LatencyMethodTile extends StatelessWidget {
-  const _LatencyMethodTile({
-    required this.label,
-    required this.subtitle,
-    required this.method,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String subtitle;
-  final String method;
-  final VoidCallback onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return _CheckTile(
-      label: label,
-      subtitle: subtitle,
-      active: AppSettings().latencyTestMethod == method,
-      onTap: () {
-        AppSettings().latencyTestMethod = method;
-        onChanged();
-      },
-    );
-  }
-}
-
-class _PlaceholderTile extends StatelessWidget {
-  const _PlaceholderTile({required this.title});
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      enabled: false,
-      title: Text(title),
-      trailing: Text(
-        '开发中',
-        style: TextStyle(color: FlsingColors.of(context).text5, fontSize: 12),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ListTile(
+    title: Text(label),
+    subtitle: Text(
+      subtitle,
+      style: TextStyle(color: FlsingColors.of(context).text4, fontSize: 13),
+    ),
+    trailing: active
+        ? Icon(Icons.check, color: FlsingColors.of(context).accent)
+        : null,
+    onTap: active ? null : onTap,
+  );
 }
 
 class _InfoTile extends StatelessWidget {
@@ -494,23 +853,32 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(color: FlsingColors.of(context).text4);
-    final valueWidget = future != null
-        ? FutureBuilder<String>(
-            future: future,
-            builder: (_, snapshot) => Text(snapshot.data ?? '…', style: style),
-          )
-        : Text(value ?? '', style: style);
+    final style = TextStyle(
+      color: FlsingColors.of(context).text4,
+      fontSize: 13,
+    );
     return ListTile(
       title: Text(label),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          valueWidget,
-          if (onTap != null) ...[
-            const SizedBox(width: 6),
+          if (future != null)
+            FutureBuilder<String>(
+              future: future,
+              builder: (_, snapshot) =>
+                  Text(snapshot.data ?? '...', style: style),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Text(
+                value ?? '',
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+          if (onTap != null)
             Icon(Icons.chevron_right, size: 18, color: style.color),
-          ],
         ],
       ),
       onTap: onTap,
@@ -518,11 +886,50 @@ class _InfoTile extends StatelessWidget {
   }
 }
 
+class _TrailingValue extends StatelessWidget {
+  const _TrailingValue(this.value);
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    value,
+    style: TextStyle(color: FlsingColors.of(context).text4, fontSize: 13),
+  );
+}
+
+String _phaseName(ConnectionPhase phase) => switch (phase) {
+  ConnectionPhase.connected => '已连接',
+  ConnectionPhase.connecting => '连接中',
+  ConnectionPhase.disconnecting => '断开中',
+  ConnectionPhase.disconnected => '未连接',
+};
+
+String _modeName(ProxyMode mode) => switch (mode) {
+  ProxyMode.rule => '规则模式',
+  ProxyMode.global => '全局模式',
+  ProxyMode.direct => '直连模式',
+};
+
+String _themeName(ThemeMode mode) => switch (mode) {
+  ThemeMode.system => '跟随系统',
+  ThemeMode.light => '浅色',
+  ThemeMode.dark => '深色',
+};
+
+String _logLevelName(int level) => switch (level) {
+  0 => 'panic',
+  1 => 'fatal',
+  2 => 'error',
+  3 => 'warn',
+  4 => 'info',
+  5 => 'debug',
+  _ => 'trace',
+};
+
 enum _UpdatePhase { checking, downloading, upToDate, installing, failed }
 
 class _UpdateDialog extends StatefulWidget {
   const _UpdateDialog({required this.service});
-
   final AppUpdateService service;
 
   @override
@@ -560,27 +967,28 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         setState(() => _phase = _UpdatePhase.upToDate);
         return;
       }
-
       setState(() => _phase = _UpdatePhase.downloading);
       final apk = await widget.service.downloadApk(
         result.release,
         onProgress: (received, total) {
-          if (!mounted) return;
-          setState(() {
-            _received = received;
-            _total = total;
-          });
+          if (mounted) {
+            setState(() {
+              _received = received;
+              _total = total;
+            });
+          }
         },
       );
       if (!mounted) return;
       setState(() => _phase = _UpdatePhase.installing);
       await widget.service.installApk(apk);
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _UpdatePhase.failed;
-        _error = error.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _phase = _UpdatePhase.failed;
+          _error = error.toString();
+        });
+      }
     }
   }
 
@@ -642,7 +1050,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   };
 
   String get _message => switch (_phase) {
-    _UpdatePhase.checking => '正在从 GitHub 获取最新版本…',
+    _UpdatePhase.checking => '正在从 GitHub 获取最新版本。',
     _UpdatePhase.downloading => '发现 v${_release?.version}，正在下载安装包。',
     _UpdatePhase.upToDate => '当前版本已经是 GitHub 上的最新版本。',
     _UpdatePhase.installing => '安装包已下载，已唤起系统安装器。',
@@ -652,7 +1060,6 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   String get _downloadProgress {
     final received = (_received / 1024 / 1024).toStringAsFixed(1);
     if (_total == null || _total == 0) return '$received MB';
-    final total = (_total! / 1024 / 1024).toStringAsFixed(1);
-    return '$received / $total MB';
+    return '$received / ${(_total! / 1024 / 1024).toStringAsFixed(1)} MB';
   }
 }

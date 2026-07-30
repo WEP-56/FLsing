@@ -19,11 +19,20 @@ class AppState extends ChangeNotifier {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final List<SubscriptionItem> _profiles = [];
   final List<ProxyNode> _nodes = [];
+  final List<ClientLog> _logs = [];
   // tag → 节点服务器地址端口，供 TCP 直连测速使用（从配置文件解析）。
   final Map<String, ({String host, int port})> _endpoints = {};
 
   static const _tcpProbeTimeout = Duration(seconds: 5);
   static const _tcpProbeConcurrency = 8;
+  static const _maxRetainedLogs = 600;
+  static const _reconnectDelays = <Duration>[
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+    Duration(seconds: 16),
+    Duration(seconds: 32),
+  ];
 
   bool _testingAll = false;
   Timer? _kernelTestTimer;
@@ -44,6 +53,10 @@ class AppState extends ChangeNotifier {
   ProxyMode _mode = ProxyMode.rule;
   Duration _connectedFor = Duration.zero;
   Timer? _connectionTimer;
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _connectionRequested = false;
+  String? _lastError;
   String? _activeSubscriptionId;
   String? _selectedNodeId;
   String? _activeGroupTag;
@@ -70,6 +83,9 @@ class AppState extends ChangeNotifier {
   bool get isTestingAny => _testingAll || _nodes.any((node) => node.testing);
 
   IpInfo? get ipInfo => _ipInfo;
+  List<ClientLog> get logs => List.unmodifiable(_logs);
+  String? get lastError => _lastError;
+  bool get reconnectPending => _reconnectTimer?.isActive ?? false;
 
   /// 还没有任何 IP 结果时的初始加载态（IpChip 显示骨架条）。
   bool get ipLoading => _ipFetching && _ipInfo == null;
@@ -109,6 +125,54 @@ class AppState extends ChangeNotifier {
 
   Future<String> singBoxVersion() => _service.singBoxVersion();
 
+  void setAutoReconnect(bool value) {
+    AppSettings().autoReconnect = value;
+    if (!value) _cancelReconnect();
+    notifyListeners();
+  }
+
+  void clearLogs() {
+    _logs.clear();
+    notifyListeners();
+  }
+
+  Future<String> buildDiagnosticReport() async {
+    String coreVersion;
+    try {
+      coreVersion = await _service.singBoxVersion();
+    } catch (_) {
+      coreVersion = 'unavailable';
+    }
+    final ruleSetUpdatedAt = AppSettings().ruleSetUpdatedAt;
+    final ruleSetTime = ruleSetUpdatedAt == 0
+        ? 'built-in'
+        : DateTime.fromMillisecondsSinceEpoch(
+            ruleSetUpdatedAt,
+          ).toIso8601String();
+    return <String>[
+      'FLsing diagnostic report',
+      'Generated: ${DateTime.now().toIso8601String()}',
+      'VPN state: ${_phase.name}',
+      'Proxy mode: ${_mode.name}',
+      'sing-box: $coreVersion',
+      'Active subscription: ${activeSubscription?.name ?? 'none'}',
+      'Selected node: ${selectedNode?.name ?? 'none'}',
+      'Exit IP: ${_ipInfo?.ip ?? 'unavailable'}',
+      'Rule sets: $ruleSetTime',
+      'Auto reconnect: ${AppSettings().autoReconnect}',
+      'Last error: ${_lastError ?? 'none'}',
+    ].join('\n');
+  }
+
+  String buildSanitizedLogReport() => <String>[
+    'FLsing logs',
+    ..._logs.map(
+      (log) => '[${_logLevelName(log.level)}] ${_sanitizeLog(log.message)}',
+    ),
+  ].join('\n');
+
+  String sanitizedLogMessage(String message) => _sanitizeLog(message);
+
   Future<void> initialize() async {
     if (_initializing || _initialized) return;
     _initializing = true;
@@ -141,17 +205,23 @@ class AppState extends ChangeNotifier {
     }
     try {
       if (isConnected) {
+        _connectionRequested = false;
+        _cancelReconnect();
         _phase = ConnectionPhase.disconnecting;
         notifyListeners();
         await _service.stopVpn();
       } else {
+        _connectionRequested = true;
+        _cancelReconnect();
         _phase = ConnectionPhase.connecting;
         notifyListeners();
         await _service.startVpn();
       }
     } catch (error) {
       _phase = ConnectionPhase.disconnected;
+      _lastError = _connectionError(error);
       _feedback = _connectionError(error);
+      if (_canRetryConnectionError(error)) _scheduleReconnect();
       notifyListeners();
     }
   }
@@ -491,6 +561,9 @@ class AppState extends ChangeNotifier {
     _subscriptions.add(
       _service.clashModeStream.listen(_onClashMode, onError: _onNativeError),
     );
+    _subscriptions.add(
+      _service.logStream.listen(_onLogs, onError: _onNativeError),
+    );
   }
 
   void _onProxyState(ProxyState state) {
@@ -500,6 +573,9 @@ class AppState extends ChangeNotifier {
         _phase = ConnectionPhase.connecting;
       case ProxyState.started:
         _phase = ConnectionPhase.connected;
+        _lastError = null;
+        _reconnectAttempt = 0;
+        _cancelReconnect();
         _startTimer();
         unawaited(_applySelectionToRunningService());
         // 隧道建立后路由需要片刻收敛，稍等再检测出口 IP。
@@ -519,6 +595,7 @@ class AppState extends ChangeNotifier {
             refreshIpInfo(settleDelay: const Duration(milliseconds: 800)),
           );
         }
+        _scheduleReconnect();
     }
     notifyListeners();
   }
@@ -616,6 +693,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onLogs(List<ClientLog> entries) {
+    if (entries.isEmpty) return;
+    _logs.addAll(entries);
+    if (_logs.length > _maxRetainedLogs) {
+      _logs.removeRange(0, _logs.length - _maxRetainedLogs);
+    }
+    notifyListeners();
+  }
+
   ProxyMode _modeFromPlugin(String value) => switch (value.toLowerCase()) {
     'global' => ProxyMode.global,
     'direct' => ProxyMode.direct,
@@ -634,8 +720,46 @@ class AppState extends ChangeNotifier {
   }
 
   void _onNativeError(Object error, StackTrace stackTrace) {
+    _lastError = 'sing-box service error: $error';
+    _scheduleReconnect();
     _feedback = 'sing-box 服务异常：$error';
     notifyListeners();
+  }
+
+  void _scheduleReconnect() {
+    if (!_connectionRequested ||
+        !AppSettings().autoReconnect ||
+        !hasSubscription ||
+        _reconnectTimer?.isActive == true) {
+      return;
+    }
+    final delay =
+        _reconnectDelays[_reconnectAttempt.clamp(
+          0,
+          _reconnectDelays.length - 1,
+        )];
+    _reconnectAttempt = (_reconnectAttempt + 1).clamp(
+      0,
+      _reconnectDelays.length - 1,
+    );
+    _reconnectTimer = Timer(delay, () async {
+      if (!_connectionRequested || !AppSettings().autoReconnect) return;
+      _phase = ConnectionPhase.connecting;
+      notifyListeners();
+      try {
+        await _service.startVpn();
+      } catch (error) {
+        _phase = ConnectionPhase.disconnected;
+        _lastError = _connectionError(error);
+        if (_canRetryConnectionError(error)) _scheduleReconnect();
+        notifyListeners();
+      }
+    });
+  }
+
+  void _cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   void _reloadProfiles() {
@@ -652,6 +776,14 @@ class AppState extends ChangeNotifier {
               profile.typed.lastUpdated,
             ),
             nodeCount: profile.outboundsCount ?? 0,
+            uploadBytes: profile.userInfo?.upload,
+            downloadBytes: profile.userInfo?.download,
+            totalBytes: profile.userInfo?.total,
+            expireAt: profile.userInfo?.expire == null
+                ? null
+                : DateTime.fromMillisecondsSinceEpoch(
+                    profile.userInfo!.expire! * 1000,
+                  ),
           ),
         ),
       );
@@ -772,9 +904,30 @@ class AppState extends ChangeNotifier {
     return '连接失败：$text';
   }
 
+  bool _canRetryConnectionError(Object error) =>
+      !error.toString().contains('VPN_PERMISSION_DENIED');
+
+  String _logLevelName(int level) => switch (level) {
+    0 => 'panic',
+    1 => 'fatal',
+    2 => 'error',
+    3 => 'warn',
+    4 => 'info',
+    5 => 'debug',
+    _ => 'trace',
+  };
+
+  String _sanitizeLog(String message) => message
+      .replaceAll(RegExp(r'https?://[^\\s]+', caseSensitive: false), '<url>')
+      .replaceAll(
+        RegExp(r'(token|secret|password)=([^\\s&]+)', caseSensitive: false),
+        r'$1=<redacted>',
+      );
+
   @override
   void dispose() {
     _connectionTimer?.cancel();
+    _reconnectTimer?.cancel();
     _kernelTestTimer?.cancel();
     _kernelResultSettleTimer?.cancel();
     final completion = _kernelTestCompleter;
