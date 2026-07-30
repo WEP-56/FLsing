@@ -1,0 +1,53 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-state
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication / Obfuscation related
+app.*.symbols
+app.*.map.json
+
+# Android related
+.gradle/
+/android/build/
+/android/app/debug
+/android/app/profile
+/android/app/release
+/android/local.properties
+/android/key.properties
+*.keystore
+*.jks
+
+# Local AI tooling
+.agents/
+.claude/
+
+# Design reference assets (kept local only)
+/example/
