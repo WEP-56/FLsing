@@ -5,17 +5,23 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_sing_box/flutter_sing_box.dart';
 
 import '../data/services/app_settings.dart';
+import '../data/services/device_service.dart';
 import '../data/services/ip_service.dart';
 import '../data/services/sing_box_service.dart';
 import '../models/app_models.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({SingBoxService? service, IpService? ipService})
-    : _service = service ?? SingBoxService(),
-      _ipService = ipService ?? IpService();
+  AppState({
+    SingBoxService? service,
+    IpService? ipService,
+    DeviceService? deviceService,
+  }) : _service = service ?? SingBoxService(),
+       _ipService = ipService ?? IpService(),
+       _deviceService = deviceService ?? DeviceService();
 
   final SingBoxService _service;
   final IpService _ipService;
+  final DeviceService _deviceService;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final List<SubscriptionItem> _profiles = [];
   final List<ProxyNode> _nodes = [];
@@ -131,6 +137,51 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setAutoConnectOnLaunch(bool value) {
+    AppSettings().autoConnectOnLaunch = value;
+    notifyListeners();
+  }
+
+  Future<void> reloadVpnForSettings() async {
+    if (!isConnected) {
+      _feedback = '设置已保存，将在下次连接后生效';
+      notifyListeners();
+      return;
+    }
+    try {
+      await _service.reloadService();
+      _feedback = 'VPN 正在重载以应用设置';
+    } catch (error) {
+      _feedback = '应用设置失败：$error';
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSystemHttpProxyEnabled(bool enabled) async {
+    try {
+      final supported = await _service.setSystemHttpProxyEnabled(enabled);
+      if (!supported) {
+        _feedback = '当前订阅配置不支持系统 HTTP 代理';
+        notifyListeners();
+        return;
+      }
+      await reloadVpnForSettings();
+    } catch (error) {
+      _feedback = '设置系统 HTTP 代理失败：$error';
+      notifyListeners();
+    }
+  }
+
+  Future<void> setDynamicNotificationEnabled(bool enabled) async {
+    if (enabled && !await _deviceService.requestNotificationPermission()) {
+      _feedback = '未取得通知权限，无法显示实时速率';
+      notifyListeners();
+      return;
+    }
+    _service.platformSettings.dynamicNotificationEnabled = enabled;
+    await reloadVpnForSettings();
+  }
+
   void clearLogs() {
     _logs.clear();
     notifyListeners();
@@ -187,6 +238,11 @@ class AppState extends ChangeNotifier {
       if (AppSettings().autoUpdateSubscriptions) {
         unawaited(_refreshStaleSubscriptions());
       }
+      if (AppSettings().autoConnectOnLaunch &&
+          AppSettings().connectionRequested &&
+          hasSubscription) {
+        unawaited(toggleConnection());
+      }
       unawaited(refreshIpInfo());
     } catch (error) {
       _feedback = 'sing-box 初始化失败：$error';
@@ -206,12 +262,14 @@ class AppState extends ChangeNotifier {
     try {
       if (isConnected) {
         _connectionRequested = false;
+        AppSettings().connectionRequested = false;
         _cancelReconnect();
         _phase = ConnectionPhase.disconnecting;
         notifyListeners();
         await _service.stopVpn();
       } else {
         _connectionRequested = true;
+        AppSettings().connectionRequested = true;
         _cancelReconnect();
         _phase = ConnectionPhase.connecting;
         notifyListeners();
@@ -221,6 +279,10 @@ class AppState extends ChangeNotifier {
       _phase = ConnectionPhase.disconnected;
       _lastError = _connectionError(error);
       _feedback = _connectionError(error);
+      if (!_canRetryConnectionError(error)) {
+        _connectionRequested = false;
+        AppSettings().connectionRequested = false;
+      }
       if (_canRetryConnectionError(error)) _scheduleReconnect();
       notifyListeners();
     }
@@ -517,16 +579,39 @@ class AppState extends ChangeNotifier {
     }, failurePrefix: '更新订阅失败');
   }
 
-  Future<void> refreshSubscription(String id) async {
+  Future<bool> refreshSubscription(String id, {bool automatic = false}) async {
     final profile = _service.profiles
         .where((item) => item.id.toString() == id)
         .firstOrNull;
-    if (profile == null) return;
-    await _runWithFeedback(() async {
-      await _service.refreshProfile(profile);
-      _reloadProfiles();
-      await _loadConfiguredNodes();
-    }, failurePrefix: '更新订阅失败');
+    if (profile == null) return false;
+    final retryCount = automatic
+        ? AppSettings().subscriptionUpdateRetryCount
+        : 0;
+    Object? lastError;
+    for (var attempt = 0; attempt <= retryCount; attempt++) {
+      try {
+        await _service.refreshProfile(profile);
+        _reloadProfiles();
+        await _loadConfiguredNodes();
+        if (isConnected && profile.id.toString() == _activeSubscriptionId) {
+          await _service.reloadService();
+        }
+        AppSettings().lastSubscriptionUpdateError = null;
+        if (!automatic) _feedback = '订阅已更新';
+        notifyListeners();
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (attempt < retryCount) {
+          await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+        }
+      }
+    }
+    final message = '更新订阅失败：$lastError';
+    AppSettings().lastSubscriptionUpdateError = message;
+    if (!automatic) _feedback = message;
+    notifyListeners();
+    return false;
   }
 
   Future<void> activateSubscription(String id) async {
@@ -710,12 +795,19 @@ class AppState extends ChangeNotifier {
 
   /// 打开 app 时静默刷新超过时限未更新的订阅。
   Future<void> _refreshStaleSubscriptions() async {
+    final settings = AppSettings();
+    if (settings.subscriptionUpdatesOnWifiOnly &&
+        !await _deviceService.isWifiConnection()) {
+      settings.lastSubscriptionUpdateError = '等待 Wi-Fi 后自动更新';
+      notifyListeners();
+      return;
+    }
     final staleBefore = DateTime.now().subtract(
-      Duration(hours: AppSettings().subscriptionStaleHours),
+      Duration(hours: settings.subscriptionStaleHours),
     );
     for (final item in List.of(_profiles)) {
       if (item.updatedAt.isAfter(staleBefore)) continue;
-      await refreshSubscription(item.id);
+      await refreshSubscription(item.id, automatic: true);
     }
   }
 

@@ -24,11 +24,45 @@ class AppSettings {
       _store.getBool(_Keys.autoReconnect, defaultValue: true);
   set autoReconnect(bool value) => _store.setBool(_Keys.autoReconnect, value);
 
+  /// 应用完成初始化后，恢复上一次由用户发起的连接。
+  bool get autoConnectOnLaunch =>
+      _store.getBool(_Keys.autoConnectOnLaunch, defaultValue: false);
+  set autoConnectOnLaunch(bool value) =>
+      _store.setBool(_Keys.autoConnectOnLaunch, value);
+
+  /// 用户上一次是否保持 VPN 连接。手动断开会清除该意图。
+  bool get connectionRequested =>
+      _store.getBool(_Keys.connectionRequested, defaultValue: false);
+  set connectionRequested(bool value) =>
+      _store.setBool(_Keys.connectionRequested, value);
+
   /// 订阅视为过期的小时数。
   int get subscriptionStaleHours =>
       _store.getInt(_Keys.subscriptionStaleHours, defaultValue: 24);
   set subscriptionStaleHours(int value) =>
       _store.setInt(_Keys.subscriptionStaleHours, value);
+
+  /// 自动更新订阅时只允许使用 Wi-Fi。
+  bool get subscriptionUpdatesOnWifiOnly =>
+      _store.getBool(_Keys.subscriptionUpdatesOnWifiOnly, defaultValue: false);
+  set subscriptionUpdatesOnWifiOnly(bool value) =>
+      _store.setBool(_Keys.subscriptionUpdatesOnWifiOnly, value);
+
+  /// 自动更新订阅失败后的额外尝试次数。
+  int get subscriptionUpdateRetryCount =>
+      _store.getInt(_Keys.subscriptionUpdateRetryCount, defaultValue: 2);
+  set subscriptionUpdateRetryCount(int value) =>
+      _store.setInt(_Keys.subscriptionUpdateRetryCount, value.clamp(0, 3));
+
+  String? get lastSubscriptionUpdateError =>
+      _store.getString(_Keys.lastSubscriptionUpdateError);
+  set lastSubscriptionUpdateError(String? value) {
+    if (value == null || value.isEmpty) {
+      _store.removeValue(_Keys.lastSubscriptionUpdateError);
+    } else {
+      _store.setString(_Keys.lastSubscriptionUpdateError, value);
+    }
+  }
 
   /// 规则库最近一次更新时间（毫秒时间戳，0 表示仍是内置版本）。
   int get ruleSetUpdatedAt => _store.getInt(_Keys.ruleSetUpdatedAt);
@@ -72,7 +106,13 @@ class _Keys {
   static const clashMode = 'clash_mode';
   static const autoUpdateSubscriptions = 'auto_update_subscriptions';
   static const autoReconnect = 'auto_reconnect';
+  static const autoConnectOnLaunch = 'auto_connect_on_launch';
+  static const connectionRequested = 'connection_requested';
   static const subscriptionStaleHours = 'subscription_stale_hours';
+  static const subscriptionUpdatesOnWifiOnly =
+      'subscription_updates_on_wifi_only';
+  static const subscriptionUpdateRetryCount = 'subscription_update_retry_count';
+  static const lastSubscriptionUpdateError = 'last_subscription_update_error';
   static const ruleSetUpdatedAt = 'rule_set_updated_at';
   static const latencyTestMethod = 'latency_test_method';
   static const themeMode = 'theme_mode';

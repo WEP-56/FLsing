@@ -35,9 +35,9 @@ T0 验收：飞行模式恢复、进程被系统回收、VPN 权限拒绝、内�
 | --- | --- | --- | --- |
 | 启动后自动连接 | 应用启动完成、内核初始化和活动订阅就绪后，如用户开启该选项，自动连接上一次活动订阅/节点；默认关闭 | 不使用 `RECEIVE_BOOT_COMPLETED` 或 `BootReceiver`；无订阅、用户上次主动断开或 VPN 权限缺失时不强行连接 | 复用应用启动状态与用户连接意图 |
 | 分应用代理 | 关闭、白名单、黑名单三种模式；应用选择页按名称搜索、显示包名，默认隐藏系统应用 | `flutter_sing_box` 的 `CsSettingsStorage` 和 Android `VPNService` 已支持 include/exclude 包名；需要原生列举已安装应用及 Android 11+ 可见性策略，保存后重连 VPN | 参考项目 `ProfileOverrideScreen`；插件 Android VPN 侧 `addAllowedApplication`/`addDisallowedApplication` |
-| VPN 绕过开关 | 允许应用调用 Android 的 VPN bypass；默认关闭并解释影响 | 写入 TUN/VPN 覆写并重载服务；仅在内核实际支持时展示 | 参考项目 Service 的 Allow Bypass |
+| VPN 绕过开关 | 候选能力，不在当前版本展示 | 当前 `flutter_sing_box` 的 Android `VPNService` 将 `builder.allowBypass()` 注释，现有封装不能实际生效；仅在插件恢复实现或完成受控 fork 后进入排期 | 参考项目 Service 的 Allow Bypass |
 | 通知样式 | 显示或隐藏通知中的实时上/下行速率；保持系统前台服务通知 | 需要扩展插件 Android 前台通知，处理 Android 13 通知权限；该项不控制 VPN 是否有通知 | 参考项目 Dynamic Notification |
-| 系统 HTTP 代理 | 对支持 Android 系统 HTTP Proxy 的 TUN 配置提供开关；默认跟随订阅配置 | TUN `platform.http_proxy` 开启时，插件 Android `VPNService` 已调用 `setHttpProxy`；保存后重连 VPN | 插件 `SettingsManager.systemProxyEnabled` 与 `VPNService.openTun` |
+| 系统 HTTP 代理 | 对支持 Android 系统 HTTP Proxy 的 TUN 配置提供开关；默认跟随订阅配置 | TUN `platform.http_proxy` 带本地 server/port 时，插件 Android `VPNService` 已调用 `setHttpProxy`；保存后重连 VPN；不兼容的订阅配置明确提示 | 插件 `SettingsManager.systemProxyEnabled` 与 `VPNService.openTun` |
 | 订阅更新策略 | 保留已有开关和时长，补充“仅 Wi-Fi”“失败重试”和“上次失败原因” | 使用 Android 网络能力判断；订阅更新不得阻塞首屏或 VPN 启动 | 参考项目的订阅自动更新概念，结合 FLsing 现有实现 |
 | 设置备份与恢复 | 导出不含订阅凭据的应用偏好；恢复前预览并确认 | 使用版本化 JSON；订阅 URL、节点配置、安装包缓存默认不导出 | 参考项目对分应用列表的导入/导出思路 |
 

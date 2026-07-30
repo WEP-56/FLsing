@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:mmkv/mmkv.dart';
 
 import 'app_settings.dart';
+import 'platform_settings_service.dart';
 import 'rule_set_service.dart';
 import 'subscription_parser.dart';
 
@@ -16,6 +17,7 @@ class SingBoxService {
 
   final FlutterSingBox _client;
   final RuleSetService ruleSets = RuleSetService();
+  final PlatformSettingsService platformSettings = PlatformSettingsService();
   bool _initialized = false;
 
   Stream<ProxyState> get proxyStateStream => _client.proxyStateStream;
@@ -177,7 +179,17 @@ class SingBoxService {
 
   /// 设置变更（如测速链接）后重新对使用中的配置打补丁。
   /// 不主动重载服务，连接中的流量不受影响，重新连接后生效。
-  Future<void> applySettingsPatch() => _patchUsingConfig();
+  Future<void> applySettingsPatch() async {
+    await _patchUsingConfig();
+  }
+
+  /// Enables Android's system HTTP proxy only for configurations which expose
+  /// a local HTTP inbound through the TUN platform settings.
+  Future<bool> setSystemHttpProxyEnabled(bool enabled) async {
+    final supported = await _patchUsingConfig(systemHttpProxyOverride: enabled);
+    if (supported) platformSettings.systemHttpProxyEnabled = enabled;
+    return supported;
+  }
 
   Future<void> _activateProfile(Profile profile) async {
     ProfileStorage().setSelectedProfile(profile.id);
@@ -191,11 +203,11 @@ class SingBoxService {
   /// - 未识别的远程规则集下载改走代理；
   /// - 写入持久化的默认代理模式；
   /// - urltest 出站统一改用设置中的测速链接。
-  Future<void> _patchUsingConfig() async {
+  Future<bool> _patchUsingConfig({bool? systemHttpProxyOverride}) async {
     final file = await ProfileStorage().getUsingConfig();
-    if (!await file.exists()) return;
+    if (!await file.exists()) return false;
     final dynamic config = jsonDecode(await file.readAsString());
-    if (config is! Map<String, dynamic>) return;
+    if (config is! Map<String, dynamic>) return false;
 
     final experimental =
         (config['experimental'] as Map<String, dynamic>?) ?? {};
@@ -210,6 +222,29 @@ class SingBoxService {
         if (outbound['type'] == OutboundType.urltest) {
           outbound['url'] = AppSettings().testUrl;
         }
+      }
+    }
+
+    var supportsSystemHttpProxy = false;
+    final inbounds = config['inbounds'];
+    if (inbounds is List) {
+      for (final inbound in inbounds.whereType<Map<String, dynamic>>()) {
+        if (inbound['type'] != 'tun') continue;
+        final platform = Map<String, dynamic>.from(
+          inbound['platform'] as Map? ?? const {},
+        );
+        final httpProxy = Map<String, dynamic>.from(
+          platform['http_proxy'] as Map? ?? const {},
+        );
+        if (httpProxy['server'] is! String ||
+            httpProxy['server_port'] is! num) {
+          continue;
+        }
+        httpProxy['enabled'] =
+            systemHttpProxyOverride ?? platformSettings.systemHttpProxyEnabled;
+        platform['http_proxy'] = httpProxy;
+        inbound['platform'] = platform;
+        supportsSystemHttpProxy = true;
       }
     }
 
@@ -231,6 +266,7 @@ class SingBoxService {
       }
     }
     await file.writeAsString(jsonEncode(config));
+    return supportsSystemHttpProxy;
   }
 
   Future<http.Response> _fetchSubscription(Uri url) async {

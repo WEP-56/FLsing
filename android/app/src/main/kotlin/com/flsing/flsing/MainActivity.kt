@@ -4,6 +4,10 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.PowerManager
 import android.provider.OpenableColumns
@@ -18,12 +22,14 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     companion object {
         private const val FILE_PICKER_REQUEST_CODE = 4102
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 4103
         private const val UPDATE_CHANNEL = "flsing/app_update"
         private const val DEVICE_CHANNEL = "flsing/device"
     }
 
     private var pendingFileResult: MethodChannel.Result? = null
     private var pendingApk: File? = null
+    private var pendingNotificationPermissionResult: MethodChannel.Result? = null
 
     override fun onResume() {
         super.onResume()
@@ -47,6 +53,20 @@ class MainActivity : FlutterActivity() {
         runCatching { copyToPrivateStorage(uri.toString()) }
             .onSuccess(result::success)
             .onFailure { result.error("FILE_IMPORT_FAILED", it.message, null) }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != NOTIFICATION_PERMISSION_REQUEST_CODE) return
+        val result = pendingNotificationPermissionResult ?: return
+        pendingNotificationPermissionResult = null
+        result.success(
+            grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED,
+        )
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -87,10 +107,64 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isIgnoringBatteryOptimizations" -> result.success(isIgnoringBatteryOptimizations())
                     "requestIgnoreBatteryOptimizations" -> requestIgnoreBatteryOptimizations(result)
+                    "getInstalledApplications" -> getInstalledApplications(result)
+                    "isWifiConnection" -> result.success(isWifiConnection())
+                    "requestNotificationPermission" -> requestNotificationPermission(result)
                     "shareFile" -> shareFile(call.arguments, result)
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun getInstalledApplications(result: MethodChannel.Result) {
+        runCatching {
+            val apps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getInstalledApplications(0)
+            }
+            apps.asSequence()
+                .filter { app ->
+                    app.packageName != packageName &&
+                        packageManager.getLaunchIntentForPackage(app.packageName) != null
+                }
+                .map { app ->
+                    mapOf(
+                        "name" to packageManager.getApplicationLabel(app).toString(),
+                        "packageName" to app.packageName,
+                        "isSystem" to (app.flags and ApplicationInfo.FLAG_SYSTEM != 0),
+                    )
+                }
+                .sortedBy { item -> (item["name"] as String).lowercase() }
+                .toList()
+        }.onSuccess(result::success)
+            .onFailure { result.error("APP_LIST_FAILED", it.message, null) }
+    }
+
+    private fun isWifiConnection(): Boolean {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(true)
+            return
+        }
+        if (pendingNotificationPermissionResult != null) {
+            result.error("NOTIFICATION_PERMISSION_BUSY", "A permission request is already in progress", null)
+            return
+        }
+        pendingNotificationPermissionResult = result
+        requestPermissions(
+            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_PERMISSION_REQUEST_CODE,
+        )
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean {
