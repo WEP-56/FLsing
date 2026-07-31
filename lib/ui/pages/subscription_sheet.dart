@@ -28,6 +28,8 @@ class SubscriptionSheet extends StatefulWidget {
 }
 
 class _SubscriptionSheetState extends State<SubscriptionSheet> {
+  final DateTime _openedAt = DateTime.now();
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
@@ -90,6 +92,7 @@ class _SubscriptionSheetState extends State<SubscriptionSheet> {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) => StaggeredEntrance(
                     index: index,
+                    epoch: _openedAt,
                     child: _SubscriptionTile(item: subs[index]),
                   ),
                 ),

@@ -564,13 +564,6 @@ class _NodeListTile extends StatelessWidget {
     );
   }
 
-  void _select(BuildContext context) async {
-    final state = context.read<AppState>();
-    await state.selectNode(node.id);
-    final message = state.takeFeedback();
-    if (message != null) showAppMessage(message);
-  }
-
   void _showMenu(BuildContext context) {
     final state = context.read<AppState>();
     showFlsingMenu(
@@ -580,7 +573,7 @@ class _NodeListTile extends StatelessWidget {
         SheetMenuItem(
           icon: Icons.check,
           label: '设为当前',
-          onTap: () => _select(context),
+          onTap: () => _selectAndClose(context, node),
         ),
         SheetMenuItem(
           icon: Icons.speed_outlined,
@@ -612,11 +605,7 @@ class _NodeGridTile extends StatelessWidget {
       color: selected ? c.surface2 : c.surface1,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () async {
-          await state.selectNode(node.id);
-          final message = state.takeFeedback();
-          if (message != null) showAppMessage(message);
-        },
+        onTap: () => _selectAndClose(context, node),
         onLongPress: () => _showNodeInfo(context, node),
         borderRadius: BorderRadius.circular(16),
         child: Container(

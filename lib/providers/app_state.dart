@@ -79,8 +79,14 @@ class AppState extends ChangeNotifier {
   /// 推送分组（组名与新配置相同），会把刚载入的新节点列表覆盖回去。
   int _groupEventSuspensions = 0;
 
+  /// 正在进行的切换过渡数。过渡期相位短暂离开 connected，但内核仍在
+  /// 运行，用它区分「真断开」和「切换中」。
+  int _connectedTransitions = 0;
+
   /// 递增序号，丢弃过期的 _loadConfiguredNodes 结果（快速连续切换订阅时）。
   int _nodeLoadSeq = 0;
+
+  bool get _tunnelActive => isConnected || _connectedTransitions > 0;
 
   ConnectionPhase get phase => _phase;
   ProxyMode get mode => _mode;
@@ -305,7 +311,7 @@ class AppState extends ChangeNotifier {
     final previous = _mode;
     _mode = mode;
     notifyListeners();
-    final wasConnected = isConnected;
+    final wasConnected = _tunnelActive;
     try {
       await _runConnectedTransition(
         () => _service.setMode(_pluginMode(mode), connected: wasConnected),
@@ -368,7 +374,7 @@ class AppState extends ChangeNotifier {
     final previous = _selectedNodeId;
     _selectedNodeId = id;
     notifyListeners();
-    if (!isConnected) {
+    if (!_tunnelActive) {
       _feedback = '节点将在连接后启用';
       notifyListeners();
       return;
@@ -684,7 +690,7 @@ class AppState extends ChangeNotifier {
       _reloadProfiles();
       await _loadConfiguredNodes();
       notifyListeners();
-      if (reloadRunning && isConnected) {
+      if (reloadRunning && _tunnelActive) {
         await _runConnectedTransition(() => _service.reloadService());
         unawaited(
           refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)),
@@ -695,21 +701,23 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 已连接时执行会打断隧道的操作：先切到 connecting 相位，操作完成后
+  /// 隧道运行时执行会打断它的操作：先切到 connecting 相位，操作完成后
   /// 留一小段收敛期再恢复 connected。期间若内核推送了真实状态事件
   /// （如重载失败进入 stopped），以事件结果为准，不强行恢复。
   Future<void> _runConnectedTransition(Future<void> Function() action) async {
-    if (!isConnected) {
+    if (!_tunnelActive) {
       await action();
       return;
     }
+    _connectedTransitions++;
     _phase = ConnectionPhase.connecting;
     notifyListeners();
     try {
       await action();
       await Future<void>.delayed(_transitionSettle);
     } finally {
-      if (_phase == ConnectionPhase.connecting) {
+      _connectedTransitions--;
+      if (_connectedTransitions == 0 && _phase == ConnectionPhase.connecting) {
         _phase = ConnectionPhase.connected;
       }
       notifyListeners();

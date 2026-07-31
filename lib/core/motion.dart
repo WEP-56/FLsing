@@ -127,28 +127,28 @@ class _StaggeredEntranceState extends State<StaggeredEntrance>
 /// 实际项目里直接用 Navigator 即可，自带边缘返回手势。
 class SlidePageRoute<T> extends PageRouteBuilder<T> {
   SlidePageRoute({required this.page})
-      : super(
-          transitionDuration: Motion.normal,
-          reverseTransitionDuration: Motion.normal,
-          pageBuilder: (_, _, _) => page,
-          transitionsBuilder: (_, animation, secondary, child) {
-            final slide = Tween(
-              begin: const Offset(1, 0),
-              end: Offset.zero,
-            ).chain(CurveTween(curve: Motion.ease)).animate(animation);
+    : super(
+        transitionDuration: Motion.normal,
+        reverseTransitionDuration: Motion.normal,
+        pageBuilder: (_, _, _) => page,
+        transitionsBuilder: (_, animation, secondary, child) {
+          final slide = Tween(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).chain(CurveTween(curve: Motion.ease)).animate(animation);
 
-            // 上一页轻微左移，制造层级纵深
-            final push = Tween(
-              begin: Offset.zero,
-              end: const Offset(-0.32, 0),
-            ).chain(CurveTween(curve: Motion.ease)).animate(secondary);
+          // 上一页轻微左移，制造层级纵深
+          final push = Tween(
+            begin: Offset.zero,
+            end: const Offset(-0.32, 0),
+          ).chain(CurveTween(curve: Motion.ease)).animate(secondary);
 
-            return SlideTransition(
-              position: push,
-              child: SlideTransition(position: slide, child: child),
-            );
-          },
-        );
+          return SlideTransition(
+            position: push,
+            child: SlideTransition(position: slide, child: child),
+          );
+        },
+      );
 
   final Widget page;
 }

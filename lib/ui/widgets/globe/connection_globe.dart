@@ -20,10 +20,10 @@ class _Target {
   static const connected = _Target(0.22, 1.0, 0.9, 0.0, 1.0);
 
   static _Target of(ConnState s) => switch (s) {
-        ConnState.idle => idle,
-        ConnState.connecting => connecting,
-        ConnState.connected => connected,
-      };
+    ConnState.idle => idle,
+    ConnState.connecting => connecting,
+    ConnState.connected => connected,
+  };
 }
 
 /// 连接状态地球。
@@ -133,39 +133,39 @@ class _ConnectionGlobeState extends State<ConnectionGlobe>
     final c = FlsingColors.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
 
-    return GestureDetector(
-      onTap: widget.onTap,
-      behavior: HitTestBehavior.opaque,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: widget.maxSize,
-          maxHeight: widget.maxSize,
-        ),
-        child: AspectRatio(
-          aspectRatio: 1,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: GlobePainter(
-                    points: _points,
-                    spin: _spin,
-                    satAngle: _sat,
-                    alpha: _alpha,
-                    ring: _ring,
-                    halo: _halo,
-                    glow: _glow,
-                    halos: List.unmodifiable(_halos),
-                    colors: c,
-                    isLight: isLight,
-                  ),
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: widget.maxSize,
+        maxHeight: widget.maxSize,
+      ),
+      child: AspectRatio(
+        aspectRatio: 1,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            RepaintBoundary(
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: GlobePainter(
+                  points: _points,
+                  spin: _spin,
+                  satAngle: _sat,
+                  alpha: _alpha,
+                  ring: _ring,
+                  halo: _halo,
+                  glow: _glow,
+                  halos: List.unmodifiable(_halos),
+                  colors: c,
+                  isLight: isLight,
                 ),
               ),
-              _CenterCapsule(state: widget.state, elapsed: widget.elapsed),
-            ],
-          ),
+            ),
+            _CenterCapsule(
+              state: widget.state,
+              elapsed: widget.elapsed,
+              onTap: widget.onTap,
+            ),
+          ],
         ),
       ),
     );
@@ -173,11 +173,19 @@ class _ConnectionGlobeState extends State<ConnectionGlobe>
 }
 
 /// 中心状态舱 —— 唯一使用 BackdropFilter 的地方之一。
+///
+/// 同时也是开始 / 断开连接的按钮：命中区域仅限这块圆片
+/// （ClipOval 让命中检测跟随圆形），避免整个地球区域误触。
 class _CenterCapsule extends StatelessWidget {
-  const _CenterCapsule({required this.state, required this.elapsed});
+  const _CenterCapsule({
+    required this.state,
+    required this.elapsed,
+    required this.onTap,
+  });
 
   final ConnState state;
   final Duration elapsed;
+  final VoidCallback? onTap;
 
   static String _fmt(Duration d) {
     String p(int n) => n.toString().padLeft(2, '0');
@@ -191,81 +199,101 @@ class _CenterCapsule extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, box) {
         final d = box.maxHeight * 0.46;
-        return Container(
+        return SizedBox(
           width: d,
           height: d,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: c.globeCore,
-            border: Border.all(color: c.border2),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 280),
-            child: switch (state) {
-              ConnState.connected => Column(
-                  key: const ValueKey('connected'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('已连接',
-                        style: TextStyle(fontSize: 11.5, color: c.text3)),
-                    const SizedBox(height: 4),
-                    Text(
-                      _fmt(elapsed),
-                      style: TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.4,
-                        color: c.text1,
-                        fontFeatures: kTabularFigures,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+          child: ClipOval(
+            child: GestureDetector(
+              onTap: onTap,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: c.globeCore,
+                  border: Border.all(color: c.border2),
+                ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  child: switch (state) {
+                    ConnState.connected => Column(
+                      key: const ValueKey('connected'),
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SignalBars(level: 4, size: 10, color: c.accent),
-                        const SizedBox(width: 6),
-                        Text('稳定',
-                            style: TextStyle(
+                        Text(
+                          '已连接',
+                          style: TextStyle(fontSize: 11.5, color: c.text3),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _fmt(elapsed),
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.4,
+                            color: c.text1,
+                            fontFeatures: kTabularFigures,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SignalBars(level: 4, size: 10, color: c.accent),
+                            const SizedBox(width: 6),
+                            Text(
+                              '稳定',
+                              style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w500,
-                                color: c.accent)),
+                                color: c.accent,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                  ],
-                ),
-              ConnState.connecting => Column(
-                  key: const ValueKey('connecting'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 17,
-                      height: 17,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.8,
-                        color: c.text2,
-                      ),
+                    ConnState.connecting => Column(
+                      key: const ValueKey('connecting'),
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.8,
+                            color: c.text2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '连接中',
+                          style: TextStyle(fontSize: 11.5, color: c.text3),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    Text('连接中',
-                        style: TextStyle(fontSize: 11.5, color: c.text3)),
-                  ],
-                ),
-              ConnState.idle => Column(
-                  key: const ValueKey('idle'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('未连接',
-                        style: TextStyle(fontSize: 12.5, color: c.text4)),
-                    const SizedBox(height: 6),
-                    Text('轻点地球开始连接',
-                        style: TextStyle(
+                    ConnState.idle => Column(
+                      key: const ValueKey('idle'),
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '未连接',
+                          style: TextStyle(fontSize: 12.5, color: c.text4),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '轻点这里开始连接',
+                          style: TextStyle(
                             fontSize: 9.5,
                             letterSpacing: 1.1,
-                            color: c.text6)),
-                  ],
+                            color: c.text6,
+                          ),
+                        ),
+                      ],
+                    ),
+                  },
                 ),
-            },
+              ),
+            ),
           ),
         );
       },
