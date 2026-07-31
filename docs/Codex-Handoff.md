@@ -18,6 +18,12 @@
 - APK 构建、安装、真机、真实网络、VPN 行为和其他复杂场景由用户执行。
 - 涉及复杂或真实环境验证时，Codex 仅提供简短、可操作的测试项，不代替用户执行。
 
+## 最近验收记录
+
+- 2026-07-31：GitHub Actions APK 构建通过。
+- 2026-07-31：真实手机安装、基础 VPN 连接和网络访问测试通过，未发现明显问题。
+- 本次未覆盖手动 DoH/DoT、三种 TUN 协议栈、排除路由、复杂路由规则、连接中重载和备份恢复等深度场景。
+
 ## 当前状态
 
 | 阶段 | 状态 | 说明 |
@@ -26,17 +32,18 @@
 | T1 高频控制 | UI 与持久化完成 | 分应用代理在当前插件中的 Android 应用代码被注释，内核闭环转入插件主线修复。VPN bypass 不做。 |
 | T2 高级网络 | 第二阶段完成 | DNS、TUN、路由策略与安全本地覆写已实现；复杂 DNS、缓存等仍待开发。 |
 | T3 特权/专家能力 | 未开始 | 不应提前实现。 |
-| Android-only 插件分支 | 已提交并推送 | 提交 `b1595d9` 已移除非 Android 注册、原生实现、示例和 Dart 平台分支，并补充结构文档。 |
-| 内核通信能力 | 第一阶段完成 | 配置校验已迁移；下一步增强错误、状态、日志和维护接口。 |
+| Android-only 插件分支 | 已提交并推送 | 提交 `316fdf5` 已补充单 outbound 测速、宿主应用命名和文档驱动 example，并清理旧示例资产。 |
+| 内核通信能力 | 第二阶段开发中 | 配置校验已迁移；单 outbound 内核测速已完成插件提交和代码验证，仍待真机验证。 |
 
 ## 插件分支现状
 
 - 插件独立仓库位于 `D:\FLsing\flutter_sing_box`，远端为 `https://github.com/WEP-56/flutter_sing_box.git`，当前分支为 `master`。
-- FLsing 的 `pubspec.yaml` 已改为 Git 依赖 `WEP-56/flutter_sing_box` 的 `master`；`pubspec.lock` 当前固定在远端提交 `b1595d9`。
+- FLsing 的 `pubspec.yaml` 已改为 Git 依赖 `WEP-56/flutter_sing_box` 的 `master`；`pubspec.lock` 当前固定在远端提交 `316fdf5`。
 - FLsing 的 `.gitignore` 已排除 `/flutter_sing_box/`。插件和 FLsing 是两个独立 Git 工作区，不能在 FLsing 提交中混入插件源码。
 - 插件已删除 `ios/`、`example/ios/` 和 iOS 平台注册；默认订阅 User-Agent 收敛为 Android，移除无用的 `device_info_plus` 与 `package_info_plus` 依赖。
 - 插件结构、运行链路、包体来源和后续维护边界见 `flutter_sing_box/docs/Android-Architecture.md`。
-- 插件基础验证通过：`flutter analyze --fatal-infos` 无问题，`flutter test` 4 项通过。
+- 插件旧 `example` App 资产已删除，改为能力矩阵和分主题 Markdown 使用范例。
+- 插件基础验证通过：`flutter analyze --fatal-infos` 无问题，`flutter test` 6 项通过；FLsing 更新远端插件锁定后，`flutter analyze --fatal-infos` 无问题，`flutter test` 28 项通过。
 - 删除非 Android 文件不会直接缩小 APK。Android 包体主要由 `libbox.aar` 中的 ABI 原生库和启用功能决定，应优先使用 ABI 拆分或 AAB，再评估自维护 libbox 产物。
 
 ## 已完成设置
@@ -81,15 +88,18 @@
 - 每次设置变更都从订阅原配置重新生成 `using_config`，避免重复保存累积本地规则。
 - 路由设置已纳入高级网络 JSON，因此随现有设置备份导出和恢复。
 
-### 测速行为修复
+### 测速行为增强
 
-- 单节点测速始终使用 TCP 直连，只更新目标节点，不再触发整组内核测速。
+- 单节点直连模式继续使用节点物理地址 TCP 握手，只更新目标节点。
+- 单节点智能模式在 VPN 已连接时、内核模式在 VPN 已连接后，调用插件 `urlTestOutbound` 通过目标 outbound 完成内核测速；断开时不会伪装成代理测速。
 - 全节点测速继续遵循“智能 / 直连 / 内核”设置；内核模式仍使用整组 `urlTest(groupTag)`。
-- 已补充单元测试，覆盖内核模式下的单节点直连与全节点策略保留。
+- 已补充单元测试，覆盖单节点直连、断开提示、已连接单 outbound 内核测速与全节点策略保留。
 
 ## 已知问题与注意事项
 
-- T2 的 Android 原生 `Libbox.checkConfig` 通道与实际 VPN 行为仍应继续真机验证，特别是手动 DoH/DoT、三种 TUN 协议栈、排除路由、重载与备份恢复。
+- 插件 `checkConfig` 迁移后的 APK 已通过基础真机连接与访问测试；手动 DoH/DoT、三种 TUN 协议栈、排除路由、重载与备份恢复仍需继续验证。
+- 单 outbound 测速依赖活动配置中的认证 loopback Clash API；Dart 逻辑测试已通过，仍需真机验证 controller 启动、目标 outbound 建链、超时和错误码。
+- Android 系统 VPN 会话名已改为读取宿主应用标签，需在下一版 APK 确认系统通知由 `Clash Sing` 变为 `FLsing`。
 - 路由策略需真机验证：三种 IP 模式、常用规则、自定义规则排序、切换不同订阅后的 outbound 校验，以及连接中保存后的 VPN 重载。
 - `independent_cache`、入站 `sniff` 与 `sniff_override_destination` 在更高 sing-box 版本已废弃；当前固定的 libbox 1.13.14 仍可用。升级内核时先做兼容性审查。
 - 系统 HTTP 代理依赖订阅提供的 `tun.platform.http_proxy`；外部导入配置不一定兼容。

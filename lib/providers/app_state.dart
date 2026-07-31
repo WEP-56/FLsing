@@ -54,6 +54,7 @@ class AppState extends ChangeNotifier {
   Timer? _kernelTestTimer;
   Timer? _kernelResultSettleTimer;
   bool _kernelTesting = false;
+  bool _singleKernelTesting = false;
   bool _tcpTesting = false;
   int _kernelTestStartedAt = 0;
   final Map<String, int> _kernelTestTimes = {};
@@ -109,7 +110,8 @@ class AppState extends ChangeNotifier {
       _findProfile(_activeSubscriptionId);
   ProxyNode? get selectedNode => _findNode(_selectedNodeId);
   bool get isTestingAll => _testingAll;
-  bool get isTestingAny => _testingAll || _nodes.any((node) => node.testing);
+  bool get isTestingAny =>
+      _testingAll || _singleKernelTesting || _nodes.any((node) => node.testing);
 
   IpInfo? get ipInfo => _ipInfo;
   List<ClientLog> get logs => List.unmodifiable(_logs);
@@ -411,12 +413,42 @@ class AppState extends ChangeNotifier {
 
   Future<void> testNode(String id) async {
     if (isTestingAny) return;
+    if (_useKernelTest) {
+      await _kernelTestNode(id);
+      return;
+    }
     if (!_endpoints.containsKey(id)) {
       _feedback = '该节点缺少地址信息，无法直连测速';
       notifyListeners();
       return;
     }
     await _tcpTest([id]);
+  }
+
+  Future<void> _kernelTestNode(String id) async {
+    if (!isConnected) {
+      _feedback = '代理测速需要先连接';
+      notifyListeners();
+      return;
+    }
+    if (_nodes.every((node) => node.id != id)) {
+      _feedback = '找不到要测速的节点';
+      notifyListeners();
+      return;
+    }
+    _singleKernelTesting = true;
+    _markNodesTesting([id], testing: true, clearLatency: true);
+    notifyListeners();
+    try {
+      final delay = await _service.testOutbound(id);
+      _replaceNode(id, latency: delay, testing: false, clearLatency: true);
+    } catch (error) {
+      _feedback = '测速失败：$error';
+    } finally {
+      _markNodesTesting([id], testing: false);
+      _singleKernelTesting = false;
+      notifyListeners();
+    }
   }
 
   Future<void> testAllNodes() async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_sing_box/flutter_sing_box.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,12 +13,15 @@ void main() {
   late _FakeSingBoxService service;
   late AppState state;
   late List<({String host, int port})> probes;
+  late StreamController<ProxyState> proxyStates;
 
   setUp(() async {
     storage = _MemoryStorage();
     AppSettings.setStorageForTesting(storage);
     AppSettings().autoUpdateSubscriptions = false;
     service = _FakeSingBoxService();
+    proxyStates = StreamController<ProxyState>.broadcast();
+    service.proxyStates = proxyStates.stream;
     probes = [];
     state = AppState(
       service: service,
@@ -29,19 +34,44 @@ void main() {
     await state.initialize();
   });
 
-  tearDown(() {
+  tearDown(() async {
     state.dispose();
+    await proxyStates.close();
     AppSettings.setStorageForTesting(null);
   });
 
-  test('single-node test always uses one direct TCP probe', () async {
-    AppSettings().latencyTestMethod = LatencyTestMethod.proxy;
+  test('single-node direct test uses one physical TCP probe', () async {
+    AppSettings().latencyTestMethod = LatencyTestMethod.direct;
 
     await state.testNode('node-a');
 
     expect(probes, [(host: 'node-a.example', port: 443)]);
-    expect(service.groupTestCount, 0);
+    expect(service.outboundTests, isEmpty);
     expect(state.nodes.firstWhere((node) => node.id == 'node-a').latency, 42);
+    expect(state.nodes.firstWhere((node) => node.id == 'node-b').latency, null);
+  });
+
+  test('single-node proxy test requires an active connection', () async {
+    AppSettings().latencyTestMethod = LatencyTestMethod.proxy;
+
+    await state.testNode('node-a');
+
+    expect(probes, isEmpty);
+    expect(service.outboundTests, isEmpty);
+    expect(state.takeFeedback(), '代理测速需要先连接');
+  });
+
+  test('single-node proxy test uses the selected core outbound', () async {
+    AppSettings().latencyTestMethod = LatencyTestMethod.proxy;
+    proxyStates.add(ProxyState.started);
+    await Future<void>.delayed(Duration.zero);
+
+    await state.testNode('node-a');
+
+    expect(probes, isEmpty);
+    expect(service.outboundTests, ['node-a']);
+    expect(service.groupTestCount, 0);
+    expect(state.nodes.firstWhere((node) => node.id == 'node-a').latency, 73);
     expect(state.nodes.firstWhere((node) => node.id == 'node-b').latency, null);
   });
 
@@ -72,9 +102,11 @@ class _FakeSingBoxService extends SingBoxService {
 
   final Profile profile;
   int groupTestCount = 0;
+  final List<String> outboundTests = [];
+  late Stream<ProxyState> proxyStates;
 
   @override
-  Stream<ProxyState> get proxyStateStream => const Stream.empty();
+  Stream<ProxyState> get proxyStateStream => proxyStates;
 
   @override
   Stream<List<ClientGroup>> get groupStream => const Stream.empty();
@@ -122,6 +154,12 @@ class _FakeSingBoxService extends SingBoxService {
   @override
   Future<void> testGroup(String groupTag) async {
     groupTestCount++;
+  }
+
+  @override
+  Future<int> testOutbound(String outboundTag) async {
+    outboundTests.add(outboundTag);
+    return 73;
   }
 }
 

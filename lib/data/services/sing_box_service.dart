@@ -168,6 +168,10 @@ class SingBoxService {
   }) => _client.selectOutbound(groupTag: groupTag, outboundTag: nodeTag);
   Future<void> testGroup(String groupTag) =>
       _client.urlTest(groupTag: groupTag);
+  Future<int> testOutbound(String outboundTag) => _client.urlTestOutbound(
+    outboundTag: outboundTag,
+    url: AppSettings().testUrl,
+  );
 
   Future<String> singBoxVersion() => _client.getSingBoxVersion();
 
@@ -265,6 +269,9 @@ class SingBoxService {
     final experimental =
         (patchedConfig['experimental'] as Map<String, dynamic>?) ?? {};
     final clashApi = (experimental['clash_api'] as Map<String, dynamic>?) ?? {};
+    final clashApiPort = await _ensureClashApiPort();
+    clashApi['external_controller'] = '127.0.0.1:$clashApiPort';
+    clashApi['secret'] = AppSettings().clashApiSecret;
     clashApi['default_mode'] = preferredMode;
     experimental['clash_api'] = clashApi;
     patchedConfig['experimental'] = experimental;
@@ -323,6 +330,22 @@ class SingBoxService {
     await _configurationValidator.validate(encoded);
     await _writeUsingConfigAtomically(file, encoded);
     return supportsSystemHttpProxy;
+  }
+
+  Future<int> _ensureClashApiPort() async {
+    final settings = AppSettings();
+    final existing = settings.clashApiPort;
+    if (existing >= 1 && existing <= 65535) return existing;
+    final socket = await io.ServerSocket.bind(
+      io.InternetAddress.loopbackIPv4,
+      0,
+    );
+    try {
+      settings.clashApiPort = socket.port;
+      return socket.port;
+    } finally {
+      await socket.close();
+    }
   }
 
   Future<void> _recoverUsingConfig(io.File file) async {

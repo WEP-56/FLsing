@@ -123,7 +123,7 @@ packages:
     description:
       path: "."
       ref: master
-      resolved-ref: b1595d913f3fe4d503a21afff25c5137e355945a
+      resolved-ref: "316fdf54f5b017c018124334a5c76a01f0ee7e46"
       url: "https://github.com/WEP-56/flutter_sing_box.git"
     source: git
     version: "1.1.4"

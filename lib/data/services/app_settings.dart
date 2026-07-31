@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_sing_box/flutter_sing_box.dart';
@@ -99,6 +100,22 @@ class AppSettings {
 
   set testUrl(String value) => _store.setString(_Keys.testUrl, value.trim());
 
+  /// Internal authenticated Clash API port used for per-outbound URL tests.
+  int get clashApiPort => _store.getInt(_Keys.clashApiPort);
+  set clashApiPort(int value) => _store.setInt(_Keys.clashApiPort, value);
+
+  /// Per-install secret for the loopback Clash API. It is never exported.
+  String get clashApiSecret {
+    final existing = _store.getString(_Keys.clashApiSecret);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final random = Random.secure();
+    final value = base64UrlEncode(
+      List<int>.generate(24, (_) => random.nextInt(256), growable: false),
+    ).replaceAll('=', '');
+    _store.setString(_Keys.clashApiSecret, value);
+    return value;
+  }
+
   AdvancedNetworkSettings get advancedNetworkSettings {
     final raw = _store.getString(_Keys.advancedNetworkSettings);
     if (raw == null || raw.isEmpty) return const AdvancedNetworkSettings();
@@ -143,5 +160,7 @@ class _Keys {
   static const latencyTestMethod = 'latency_test_method';
   static const themeMode = 'theme_mode';
   static const testUrl = 'test_url';
+  static const clashApiPort = 'clash_api_port';
+  static const clashApiSecret = 'clash_api_secret';
   static const advancedNetworkSettings = 'advanced_network_settings';
 }

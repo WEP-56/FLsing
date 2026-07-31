@@ -188,7 +188,8 @@ Pushing a `v*` tag triggers GitHub Actions. The workflow runs analysis and tests
 See the [Settings Roadmap](docs/Settings-Roadmap.md) for detail.
 
 ## 致谢
-本项目安卓端核心插件：[flutter_sing_box](https://pub.dev/packages/flutter_sing_box)
+本项目的核心插件：[flutter_sing_box-WEP-56](https://github.com/WEP-56/flutter_sing_box)
+是基于插件：[flutter_sing_box](https://pub.dev/packages/flutter_sing_box) 进行通信强化的二次开发版本
 
 ## MIT
 MIT License
