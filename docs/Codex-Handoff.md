@@ -1,8 +1,16 @@
-# FLsing 设置开发交接
+# FLsing 开发交接
 
 更新时间：2026-07-31
 
-本文件只记录设置项开发进度。完整规划见 [Settings-Roadmap.md](Settings-Roadmap.md)。
+本文件记录设置项进度、插件分支状态和当前开发主线。设置完整规划见 [Settings-Roadmap.md](Settings-Roadmap.md)。
+
+## 当前主线
+
+**任务主线已切换为：分支开发——内核通信能力增强。**
+
+- T2 设置开发暂停，已完成的 DNS、TUN 和路由覆写保持现状，不继续扩展复杂 DNS。
+- 配置校验闭环已完成；后续继续在 `WEP-56/flutter_sing_box` 分支补齐稳定、可测试的 libbox 通信 API，再由 FLsing 消费。
+- `Libbox.checkConfig` 已从 FLsing 的 `MainActivity` 下沉到插件，应用层不再直接编译依赖 libbox。
 
 ## 协作与验证边界
 
@@ -15,9 +23,21 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | T0 可靠性与诊断 | 已完成 | 已提交并通过既有验收。 |
-| T1 高频控制 | 已完成 | 已提交并通过既有验收。VPN bypass 不做。 |
+| T1 高频控制 | UI 与持久化完成 | 分应用代理在当前插件中的 Android 应用代码被注释，内核闭环转入插件主线修复。VPN bypass 不做。 |
 | T2 高级网络 | 第二阶段完成 | DNS、TUN、路由策略与安全本地覆写已实现；复杂 DNS、缓存等仍待开发。 |
 | T3 特权/专家能力 | 未开始 | 不应提前实现。 |
+| Android-only 插件分支 | 已提交并推送 | 提交 `b1595d9` 已移除非 Android 注册、原生实现、示例和 Dart 平台分支，并补充结构文档。 |
+| 内核通信能力 | 第一阶段完成 | 配置校验已迁移；下一步增强错误、状态、日志和维护接口。 |
+
+## 插件分支现状
+
+- 插件独立仓库位于 `D:\FLsing\flutter_sing_box`，远端为 `https://github.com/WEP-56/flutter_sing_box.git`，当前分支为 `master`。
+- FLsing 的 `pubspec.yaml` 已改为 Git 依赖 `WEP-56/flutter_sing_box` 的 `master`；`pubspec.lock` 当前固定在远端提交 `b1595d9`。
+- FLsing 的 `.gitignore` 已排除 `/flutter_sing_box/`。插件和 FLsing 是两个独立 Git 工作区，不能在 FLsing 提交中混入插件源码。
+- 插件已删除 `ios/`、`example/ios/` 和 iOS 平台注册；默认订阅 User-Agent 收敛为 Android，移除无用的 `device_info_plus` 与 `package_info_plus` 依赖。
+- 插件结构、运行链路、包体来源和后续维护边界见 `flutter_sing_box/docs/Android-Architecture.md`。
+- 插件基础验证通过：`flutter analyze --fatal-infos` 无问题，`flutter test` 4 项通过。
+- 删除非 Android 文件不会直接缩小 APK。Android 包体主要由 `libbox.aar` 中的 ABI 原生库和启用功能决定，应优先使用 ABI 拆分或 AAB，再评估自维护 libbox 产物。
 
 ## 已完成设置
 
@@ -32,7 +52,7 @@
 ### T1：高频控制
 
 - 启动后自动连接：默认关闭，只恢复用户此前保持的连接；不使用 Android 开机自启。
-- 分应用代理：关闭、仅代理、排除三种模式，支持应用搜索和系统应用隐藏。
+- 分应用代理：关闭、仅代理、排除三种模式的 UI 与持久化已完成，支持应用搜索和系统应用隐藏；当前插件 `BoxService` 中实际调用 `includePackage/excludePackage` 的代码被注释，尚不能视为内核闭环。
 - 系统 HTTP 代理：仅在活动 TUN 配置提供本地 HTTP 代理时可用。
 - 通知栏实时速率：处理 Android 13+ 通知权限。
 - 订阅更新策略：更新间隔、仅 Wi-Fi、失败重试、最近失败原因。
@@ -74,12 +94,45 @@
 - `independent_cache`、入站 `sniff` 与 `sniff_override_destination` 在更高 sing-box 版本已废弃；当前固定的 libbox 1.13.14 仍可用。升级内核时先做兼容性审查。
 - 系统 HTTP 代理依赖订阅提供的 `tun.platform.http_proxy`；外部导入配置不一定兼容。
 - 设置恢复仍复用通用配置文件选择器，原生系统选择器不会专门过滤备份 JSON。
+- 当前插件的分应用代理包名应用代码被注释；恢复后需真机分别验证“仅代理”和“排除”模式，不能只检查设置值是否写入。
+- 插件 `serviceReload` 实际触发服务重启，现有 Future 只表示命令提交，不表示新配置已成功启动；FLsing 仍依赖状态流和固定延迟收敛。
+- `onServiceAlert` 的类型和消息当前只写原生日志，Dart 只收到 stopped 状态，自动重连无法区分真实内核错误。
 
-## T2 下一步
+## 内核通信增强路线
 
-1. 完成复杂 DNS 策略：规则分流、默认解析器、响应规则，以及复用路由编辑器模式的复杂规则表单。
-2. 实现自动选优参数：`urltest` URL、间隔、容差与自动组默认节点；手动测速保持独立。
-3. 实现日志级别、DNS/规则缓存控制、规则集更新周期、内核缓存维护和手动更新通道选择。
+### 第一阶段：配置校验闭环（已完成）
+
+1. 在插件 `FlutterSingBox`、`FlutterSingBoxPlatform` 和 MethodChannel 实现中新增 `checkConfig(String configuration)`。
+2. Android 插件侧在后台线程调用 `Libbox.checkConfig`，为空配置和内核校验失败提供稳定错误码，不能阻塞主线程。
+3. 补充真实的 MethodChannel 单元测试，覆盖方法名、参数、成功返回和 `PlatformException`；现有插件测试仅验证默认实例，覆盖不足。
+4. FLsing 的 `PlatformConfigurationValidator` 改为调用插件 API，保持现有依赖注入和高级配置服务测试不变。
+5. 迁移验证通过后，删除 `MainActivity` 中的 `flsing/configuration` 通道、`Libbox` import，以及 `android/app/build.gradle.kts` 中仅为配置校验添加的 libbox 直接依赖。
+
+### 第二阶段：状态、错误与操作反馈
+
+1. 新增 `getProxyState()` 和结构化 `serviceAlertStream`；当前 `onServiceAlert` 只写原生日志并把状态改为 stopped，Dart 无法获得错误类型和消息。
+2. 恢复并验证 `BoxService` 中的 `includePackage/excludePackage` 调用，让现有分应用设置真正进入 Android `VpnService.Builder`。
+3. 为启动、停止、重载、模式切换和出口选择统一参数校验、错误码和异步执行策略；逐步替换 FLsing 的固定延迟等待。
+4. 评估整组 `urlTest` 的完成反馈。当前 Future 只表示命令已提交，实际结果依赖 `groupStream`，没有请求关联和明确超时。
+5. 核对当前 libbox command API 后，再决定是否公开日志清理、日志级别、连接明细和服务状态快照；不为内核未支持的能力设计空接口。
+
+### 第三阶段：维护与兼容协议
+
+1. 增加插件能力查询与 libbox 版本约束，避免 FLsing 依赖某个方法但运行时插件不支持。
+2. 为 MethodChannel/EventChannel 定义稳定的数据结构和错误模型，减少字符串方法名、动态 Map 与 JSON 字符串漂移。
+3. 把仍属于内核职责的配置、缓存和诊断桥接逐步下沉到插件，FLsing 只保留系统文件选择、安装包、分享和设备权限等应用能力。
+
+## 暂停的 T2 队列
+
+1. 复杂 DNS 策略：规则分流、默认解析器、响应规则和复杂规则表单。
+2. 自动选优参数：`urltest` URL、间隔、容差与自动组默认节点。
+3. 日志级别、DNS/规则缓存控制、规则集更新周期、内核缓存维护和手动更新通道选择。
+
+## 两仓提交顺序
+
+1. 在 `flutter_sing_box` 仓库完成改动、基础测试、提交并推送 `master`。
+2. 在 FLsing 执行 `flutter pub get`，确认 `pubspec.lock` 的 `resolved-ref` 更新到插件新提交。
+3. 再提交 FLsing 的依赖迁移和应用层桥接删除；插件提交未推送前，不要把本地插件能力当作远端依赖已可用。
 
 ## 设置实现约束
 

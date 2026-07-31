@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
+import 'package:flutter_sing_box/flutter_sing_box.dart' show FlutterSingBox;
 
 import 'advanced_network_settings.dart';
 import 'route_settings.dart';
@@ -11,12 +11,10 @@ abstract interface class ConfigurationValidator {
 }
 
 class PlatformConfigurationValidator implements ConfigurationValidator {
-  static const _channel = MethodChannel('flsing/configuration');
-
   @override
   Future<void> validate(String configuration) async {
     if (!Platform.isAndroid) return;
-    await _channel.invokeMethod<void>('checkConfig', configuration);
+    await FlutterSingBox().checkConfig(configuration);
   }
 }
 

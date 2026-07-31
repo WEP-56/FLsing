@@ -17,7 +17,6 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.nekohasekai.libbox.Libbox
 import java.io.File
 
 class MainActivity : FlutterActivity() {
@@ -26,7 +25,6 @@ class MainActivity : FlutterActivity() {
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 4103
         private const val UPDATE_CHANNEL = "flsing/app_update"
         private const val DEVICE_CHANNEL = "flsing/device"
-        private const val CONFIGURATION_CHANNEL = "flsing/configuration"
     }
 
     private var pendingFileResult: MethodChannel.Result? = null
@@ -115,27 +113,6 @@ class MainActivity : FlutterActivity() {
                     "shareFile" -> shareFile(call.arguments, result)
                     else -> result.notImplemented()
                 }
-            }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CONFIGURATION_CHANNEL)
-            .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
-                if (call.method != "checkConfig") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
-                }
-                val configuration = call.arguments as? String
-                if (configuration.isNullOrBlank()) {
-                    result.error("CONFIG_INVALID", "配置内容为空", null)
-                    return@setMethodCallHandler
-                }
-                Thread {
-                    runCatching { Libbox.checkConfig(configuration) }
-                        .onSuccess { runOnUiThread { result.success(null) } }
-                        .onFailure { error ->
-                            runOnUiThread {
-                                result.error("CONFIG_INVALID", error.message, null)
-                            }
-                        }
-                }.start()
             }
     }
 

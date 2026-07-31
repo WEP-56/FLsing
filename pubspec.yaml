@@ -31,7 +31,10 @@ dependencies:
   flutter:
     sdk: flutter
 
-  flutter_sing_box: ^1.1.4
+  flutter_sing_box:
+    git:
+      url: https://github.com/WEP-56/flutter_sing_box.git
+      ref: master
   http: ^1.6.0
   mmkv: ^2.4.0
   package_info_plus: ^10.2.1

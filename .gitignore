@@ -54,6 +54,7 @@ app.*.map.json
 
 # Design reference assets (kept local only)
 /example/
+/flutter_sing_box/
 
 # GitHub Pages interface preview build output
 /docs/proxy-client-ui-design/node_modules/
