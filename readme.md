@@ -45,7 +45,7 @@ FLsing 面向希望快速、稳定使用代理的 Android 用户。导入订阅�
   <img src="docs/proxy-client-ui-design/订阅抽屉.png" width="30%" alt="FLsing 订阅管理 / Subscription management">
 </p>
 
-点击 [在线界面预览](https://wep-56.github.io/FLsing/) 可体验设计稿中的连接、节点、订阅和设置交互。该预览是前端演示，不会创建 VPN 连接或处理真实订阅。
+点击 [在线界面预览](https://wep-56.github.io/FLsing/) 可体验设计稿中的连接、节点、订阅和设置交互。该预览是前端演示，不会创建 VPN 连接或处理真实订阅。界面预览不代表实际安装后的真实功能
 
 ### 功能
 

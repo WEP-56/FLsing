@@ -22,9 +22,75 @@ class NodeSheet extends StatefulWidget {
 }
 
 class _NodeSheetState extends State<NodeSheet> {
+  /// 列表项高约 60 + 间距 8 / 网格行高 128 + 间距 8。
+  static const double _listStride = 68;
+  static const double _gridStride = 136;
+
+  /// 定位选中节点时在其上方保留的上下文空间。
+  static const double _leadIn = 96;
+
+  final DateTime _openedAt = DateTime.now();
+  late final ScrollController _scroll;
+  int _anchorIndex = 0;
   String _query = '';
   bool _grid = false;
   bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final state = context.read<AppState>();
+    final index = state.nodes.indexWhere(
+      (node) => node.id == state.selectedNode?.id,
+    );
+    // 打开抽屉直接定位到当前选中节点（估算高度，误差由 _leadIn 吸收）。
+    final offset = _offsetFor(index, grid: _grid);
+    _anchorIndex = offset ~/ _listStride;
+    _scroll = ScrollController(initialScrollOffset: offset);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  double _offsetFor(int index, {required bool grid}) {
+    if (index <= 0) return 0;
+    final offset = grid
+        ? (index ~/ 2) * _gridStride - _leadIn
+        : index * _listStride - _leadIn;
+    return offset < 0 ? 0 : offset;
+  }
+
+  List<ProxyNode> _visibleNodes(AppState state) {
+    final query = _query.trim().toLowerCase();
+    return state.nodes
+        .where(
+          (node) =>
+              query.isEmpty || node.displayName.toLowerCase().contains(query),
+        )
+        .toList();
+  }
+
+  void _toggleView() {
+    setState(() => _grid = !_grid);
+    // 两种布局的滚动位置不可换算，切换后重新定位到选中节点。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final state = context.read<AppState>();
+      final index = _visibleNodes(
+        state,
+      ).indexWhere((node) => node.id == state.selectedNode?.id);
+      if (index < 0) return;
+      _scroll.jumpTo(
+        _offsetFor(
+          index,
+          grid: _grid,
+        ).clamp(0.0, _scroll.position.maxScrollExtent).toDouble(),
+      );
+    });
+  }
 
   Future<void> _runWithToast(Future<void> Function() action) async {
     final state = context.read<AppState>();
@@ -46,13 +112,7 @@ class _NodeSheetState extends State<NodeSheet> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final c = FlsingColors.of(context);
-    final query = _query.trim().toLowerCase();
-    final nodes = state.nodes
-        .where(
-          (node) =>
-              query.isEmpty || node.displayName.toLowerCase().contains(query),
-        )
-        .toList();
+    final nodes = _visibleNodes(state);
 
     return Column(
       children: [
