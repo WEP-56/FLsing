@@ -156,6 +156,7 @@ class _NodeSheetState extends State<NodeSheet> {
                 )
               : _grid
               ? GridView.builder(
+                  controller: _scroll,
                   padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
@@ -165,16 +166,19 @@ class _NodeSheetState extends State<NodeSheet> {
                   ),
                   itemCount: nodes.length,
                   itemBuilder: (context, index) => StaggeredEntrance(
-                    index: index,
+                    index: index - _anchorIndex,
+                    epoch: _openedAt,
                     child: _NodeGridTile(node: nodes[index]),
                   ),
                 )
               : ListView.separated(
+                  controller: _scroll,
                   padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
                   itemCount: nodes.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) => StaggeredEntrance(
-                    index: index,
+                    index: index - _anchorIndex,
+                    epoch: _openedAt,
                     child: _NodeListTile(node: nodes[index]),
                   ),
                 ),
@@ -270,7 +274,7 @@ class _NodeSheetState extends State<NodeSheet> {
           _ToolButton(
             icon: _grid ? Icons.view_list_outlined : Icons.grid_view_outlined,
             label: '视图',
-            onTap: () => setState(() => _grid = !_grid),
+            onTap: _toggleView,
           ),
         ],
       ),
@@ -424,6 +428,16 @@ class _CountryChip extends StatelessWidget {
 String _latencyText(ProxyNode node) =>
     node.testing ? '' : (node.latency == null ? '--' : '${node.latency} ms');
 
+/// 选中节点并关闭抽屉。先收起抽屉让主界面的过渡状态可见，
+/// 反馈走全局 toast，不依赖抽屉存活。
+Future<void> _selectAndClose(BuildContext context, ProxyNode node) async {
+  final state = context.read<AppState>();
+  Navigator.of(context).pop();
+  await state.selectNode(node.id);
+  final message = state.takeFeedback();
+  if (message != null) showAppMessage(message);
+}
+
 class _NodeListTile extends StatelessWidget {
   const _NodeListTile({required this.node});
 
@@ -443,7 +457,7 @@ class _NodeListTile extends StatelessWidget {
       color: selected ? c.surface2 : c.surface1,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () => _select(context),
+        onTap: () => _selectAndClose(context, node),
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [

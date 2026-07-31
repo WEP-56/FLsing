@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, ExternalLink, GithubIcon, Menu, MessageSquare, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { Download, ExternalLink, Link2, Menu, MessageSquare, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ControlCard, Header, StatusBar } from "./components/chrome";
 import Globe from "./components/Globe";
@@ -49,7 +49,7 @@ const ISSUES_URL = `${PROJECT_URL}/issues`;
 function ProjectLinks({ compact = false }: { compact?: boolean }) {
   const actions = [
     { href: RELEASES_URL, label: "下载 Release", icon: Download },
-    { href: PROJECT_URL, label: "仓库", icon: GithubIcon },
+    { href: PROJECT_URL, label: "仓库", icon: Link2 },
     { href: ISSUES_URL, label: "反馈", icon: MessageSquare },
   ];
 
