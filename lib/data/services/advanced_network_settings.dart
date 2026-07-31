@@ -1,3 +1,5 @@
+import 'route_settings.dart';
+
 enum DnsOverrideMode { subscription, flsing, manual }
 
 enum DnsTransport { https, tls }
@@ -25,6 +27,7 @@ class AdvancedNetworkSettings {
     this.tunOverrideDestination = false,
     this.tunAddresses = const ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
     this.tunRouteExclusions = const [],
+    this.route = const RouteOverrideSettings(),
   });
 
   final DnsOverrideMode dnsMode;
@@ -44,6 +47,7 @@ class AdvancedNetworkSettings {
   final bool tunOverrideDestination;
   final List<String> tunAddresses;
   final List<String> tunRouteExclusions;
+  final RouteOverrideSettings route;
 
   AdvancedNetworkSettings copyWith({
     DnsOverrideMode? dnsMode,
@@ -63,6 +67,7 @@ class AdvancedNetworkSettings {
     bool? tunOverrideDestination,
     List<String>? tunAddresses,
     List<String>? tunRouteExclusions,
+    RouteOverrideSettings? route,
   }) => AdvancedNetworkSettings(
     dnsMode: dnsMode ?? this.dnsMode,
     dnsTransport: dnsTransport ?? this.dnsTransport,
@@ -82,6 +87,7 @@ class AdvancedNetworkSettings {
         tunOverrideDestination ?? this.tunOverrideDestination,
     tunAddresses: tunAddresses ?? this.tunAddresses,
     tunRouteExclusions: tunRouteExclusions ?? this.tunRouteExclusions,
+    route: route ?? this.route,
   );
 
   factory AdvancedNetworkSettings.fromJson(Map<String, dynamic> json) =>
@@ -122,6 +128,9 @@ class AdvancedNetworkSettings {
           'fdfe:dcba:9876::1/126',
         ]),
         tunRouteExclusions: _stringList(json['tunRouteExclusions'], const []),
+        route: _map(json['route']) == null
+            ? const RouteOverrideSettings()
+            : RouteOverrideSettings.fromJson(_map(json['route'])!),
       );
 
   Map<String, dynamic> toJson() => {
@@ -142,6 +151,7 @@ class AdvancedNetworkSettings {
     'tunOverrideDestination': tunOverrideDestination,
     'tunAddresses': tunAddresses,
     'tunRouteExclusions': tunRouteExclusions,
+    'route': route.toJson(),
   };
 
   static T _enumValue<T extends Enum>(
@@ -158,6 +168,12 @@ class AdvancedNetworkSettings {
       value is num ? value.toInt() : fallback;
   static List<String> _stringList(Object? value, List<String> fallback) =>
       value is List ? value.whereType<String>().toList() : fallback;
+  static Map<String, dynamic>? _map(Object? value) =>
+      value is Map<String, dynamic>
+      ? value
+      : value is Map
+      ? Map<String, dynamic>.from(value)
+      : null;
 }
 
 extension<T> on Iterable<T> {

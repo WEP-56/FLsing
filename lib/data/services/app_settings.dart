@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_sing_box/flutter_sing_box.dart';
 
 import 'advanced_network_settings.dart';
@@ -12,6 +13,11 @@ class AppSettings {
 
   static KeyValueStorage? _storage;
   static KeyValueStorage get _store => _storage ??= MmkvStorage('flsing_app');
+
+  @visibleForTesting
+  static void setStorageForTesting(KeyValueStorage? storage) {
+    _storage = storage;
+  }
 
   /// 代理模式（ClashMode 常量值），未连接时的选择也会持久化。
   String get clashMode => _store.getString(_Keys.clashMode) ?? ClashMode.rule;

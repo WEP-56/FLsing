@@ -12,18 +12,23 @@ import '../data/services/ip_service.dart';
 import '../data/services/sing_box_service.dart';
 import '../models/app_models.dart';
 
+typedef TcpLatencyProbe = Future<int?> Function(String host, int port);
+
 class AppState extends ChangeNotifier {
   AppState({
     SingBoxService? service,
     IpService? ipService,
     DeviceService? deviceService,
+    TcpLatencyProbe? tcpLatencyProbe,
   }) : _service = service ?? SingBoxService(),
        _ipService = ipService ?? IpService(),
-       _deviceService = deviceService ?? DeviceService();
+       _deviceService = deviceService ?? DeviceService(),
+       _tcpLatencyProbe = tcpLatencyProbe ?? _connectTcp;
 
   final SingBoxService _service;
   final IpService _ipService;
   final DeviceService _deviceService;
+  final TcpLatencyProbe _tcpLatencyProbe;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final List<SubscriptionItem> _profiles = [];
   final List<ProxyNode> _nodes = [];
@@ -148,6 +153,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<String> singBoxVersion() => _service.singBoxVersion();
+
+  Future<List<String>> availableRouteOutbounds() =>
+      _service.availableOutboundTags();
 
   void setAutoReconnect(bool value) {
     AppSettings().autoReconnect = value;
@@ -403,16 +411,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> testNode(String id) async {
     if (isTestingAny) return;
-    if (_useKernelTest) {
-      await _kernelTest();
-    } else {
-      if (!_endpoints.containsKey(id)) {
-        _feedback = '该节点缺少地址信息，无法直连测速';
-        notifyListeners();
-        return;
-      }
-      await _tcpTest([id]);
+    if (!_endpoints.containsKey(id)) {
+      _feedback = '该节点缺少地址信息，无法直连测速';
+      notifyListeners();
+      return;
     }
+    await _tcpTest([id]);
   }
 
   Future<void> testAllNodes() async {
@@ -524,11 +528,15 @@ class AppState extends ChangeNotifier {
 
   Future<int?> _tcpProbe(String id) async {
     final endpoint = _endpoints[id]!;
+    return _tcpLatencyProbe(endpoint.host, endpoint.port);
+  }
+
+  static Future<int?> _connectTcp(String host, int port) async {
     final watch = Stopwatch()..start();
     try {
       final socket = await Socket.connect(
-        endpoint.host,
-        endpoint.port,
+        host,
+        port,
         timeout: _tcpProbeTimeout,
       );
       final latency = watch.elapsedMilliseconds;

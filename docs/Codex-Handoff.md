@@ -1,152 +1,90 @@
-# FLsing Codex Handoff
+# FLsing 设置开发交接
 
-Last updated: 2026-07-30
+更新时间：2026-07-31
 
-## Project
+本文件只记录设置项开发进度。完整规划见 [Settings-Roadmap.md](Settings-Roadmap.md)。
 
-- Workspace: `D:\FLsing`
-- Product: Android Flutter client backed by `flutter_sing_box` / sing-box.
-- Current package version: `1.1.0+3`.
-- Latest committed baseline: `13383af 完成T1相关设置，跳过VPN绕过开关（插件未暴露）`.
+## 协作与验证边界
 
-## User Constraints
+- Codex 只执行 `flutter analyze`、`flutter test`、格式化和差异检查等基础代码验证。
+- APK 构建、安装、真机、真实网络、VPN 行为和其他复杂场景由用户执行。
+- 涉及复杂或真实环境验证时，Codex 仅提供简短、可操作的测试项，不代替用户执行。
 
-- Do not run local APK builds unless the user explicitly asks.
-- Do not commit, push, create releases, or move tags unless explicitly asked.
-- No `gh` CLI. The user watches GitHub in a browser.
-- Updates are manual only: Settings -> About -> Version. No automatic update check, download, or install.
-- The app should remain approachable through good defaults and navigation, not by removing advanced capability.
-- Do not implement multilingual UI. T1 uses the wording `启动后自动连接`, never Android boot auto-start.
-- Preserve unrelated worktree changes. The current T2 files below are intentionally uncommitted.
+## 当前状态
 
-## Committed Baseline
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| T0 可靠性与诊断 | 已完成 | 已提交并通过既有验收。 |
+| T1 高频控制 | 已完成 | 已提交并通过既有验收。VPN bypass 不做。 |
+| T2 高级网络 | 第二阶段完成 | DNS、TUN、路由策略与安全本地覆写已实现；复杂 DNS、缓存等仍待开发。 |
+| T3 特权/专家能力 | 未开始 | 不应提前实现。 |
 
-### T0-T1 settings
+## 已完成设置
 
-The `13383af` baseline includes the T0 features below plus the accepted T1 settings:
+### T0：可靠性与诊断
 
-- Settings redesign into category pages.
-- Auto reconnect with explicit user-intent handling and retry backoff.
-- Log stream collection, sanitized log copy/share, diagnostic snapshot, and battery-optimization guidance.
-- Manual GitHub update flow from About.
-- ABI-aware APK selection: device ABI is read on Android and the matching release APK is preferred over universal.
-- Subscription traffic/expiry fields are rendered when `Subscription-Userinfo` reaches `Profile.userInfo`.
-- Atomic latency-test result behavior was committed earlier in `262a424`.
-- Startup auto-connect, per-app proxy, dynamic notification, system HTTP proxy,
-  subscription update policy, and settings backup/restore.
+- 设置页按类别组织，并明确设置的生效时机。
+- 断线后自动重连：区分用户主动断开、VPN 授权拒绝和内核异常，使用退避重试。
+- 日志查看、清空、复制/分享脱敏日志，以及连接诊断快照。
+- 电池优化状态与系统引导。
+- 关于页手动检查更新；没有自动检查、下载或安装。
 
-Key files:
+### T1：高频控制
 
-- `lib/ui/pages/settings_page.dart`
-- `lib/providers/app_state.dart`
-- `lib/data/services/app_update_service.dart`
-- `android/app/src/main/kotlin/com/flsing/flsing/MainActivity.kt`
-- `docs/Settings-Roadmap.md`
+- 启动后自动连接：默认关闭，只恢复用户此前保持的连接；不使用 Android 开机自启。
+- 分应用代理：关闭、仅代理、排除三种模式，支持应用搜索和系统应用隐藏。
+- 系统 HTTP 代理：仅在活动 TUN 配置提供本地 HTTP 代理时可用。
+- 通知栏实时速率：处理 Android 13+ 通知权限。
+- 订阅更新策略：更新间隔、仅 Wi-Fi、失败重试、最近失败原因。
+- 设置备份与恢复：不包含订阅链接、节点配置、安装包缓存和临时错误。
+- VPN bypass：**未实现且不应展示**。`flutter_sing_box` 当前 Android 实现没有启用 `allowBypass()`。
 
-## Current Uncommitted Work: T2 Phase 1
+### T2：高级网络第一阶段
 
-### Implemented behavior
+- 独立的“高级网络”入口及 DNS、TUN 两个三级页面。
+- DNS 三档：使用订阅、FLsing 默认、手动 DoH/DoT。
+- DNS 参数：IPv4/IPv6 策略、DNS 缓存、独立缓存、FakeIP、客户端子网。
+- TUN 覆写：MTU、协议栈、自动/严格路由、嗅探、覆盖目标、IPv4/IPv6 接口地址、排除路由。
+- 默认不覆写订阅；DNS/TUN 均支持单项恢复默认。连接中保存会重载 VPN，未连接时下次连接生效。
+- 本地覆写链路：订阅原配置复制到 `using_config` 后再打补丁，不修改订阅原文。
+- 保存前通过 Android 通道调用 `Libbox.checkConfig` 校验候选配置；成功后用临时文件和备份文件替换 `using_config`。中断写入可在下次初始化恢复。
+- 高级网络设置纳入现有设置备份；旧备份缺少该字段时保持兼容。
 
-1. DNS override
-   - Three modes: preserve subscription, FLsing default, and manual DNS.
-   - Manual mode supports DoH/DoT, IPv4/IPv6 strategy, cache, independent
-     cache, FakeIP, and client subnet.
-   - The FLsing preset follows the bundled template and only adds geo rule-set
-     references when those tags exist in the active configuration.
+### T2：路由策略
 
-2. TUN override
-   - Optional override for MTU, stack, auto/strict route, sniffing, destination
-     override, IPv4/IPv6 interface addresses, and excluded routes.
-   - Override is disabled by default, preserving every subscription's TUN
-     settings until the user opts in.
+- 新增独立“路由策略”三级页面；默认关闭覆写并完整保留订阅路由。
+- 支持默认出口、自动探测出口接口、双栈/仅 IPv4/仅 IPv6。
+- 常用规则支持私有网络直连、中国大陆规则直连和阻止 QUIC。
+- 自定义规则支持完整域名、域名后缀/关键字、IP CIDR、端口/范围、进程名、应用包名、Wi-Fi SSID、网络类型和 IP 版本。
+- 自定义规则可启停、编辑、删除和拖动排序；出口可选择订阅中的实际 outbound 或沿用默认出口。
+- 写入前校验 CIDR、端口、IP 版本、规则顺序、规则集和 outbound 引用；候选配置继续通过 `Libbox.checkConfig` 后原子替换。
+- 每次设置变更都从订阅原配置重新生成 `using_config`，避免重复保存累积本地规则。
+- 路由设置已纳入高级网络 JSON，因此随现有设置备份导出和恢复。
 
-3. Safe configuration pipeline
-   - `MainActivity.kt` exposes `Libbox.checkConfig` on
-     `flsing/configuration`; the app module pins the same libbox 1.13.14 used
-     by `flutter_sing_box` so Kotlin can compile the bridge.
-   - `SingBoxService` builds a candidate from the subscription source and local
-     settings, validates it with the real core, then replaces `using_config`
-     through temporary and backup files.
-   - Interrupted replacement is recovered during initialization. Advanced
-     settings are persisted only after candidate validation succeeds.
+### 测速行为修复
 
-4. UI and backup
-   - Settings has a separate Advanced Network page with DNS and TUN third-level
-     forms, per-section reset, and explicit reload/next-connect status.
-   - Existing schema-v1 backups now include the advanced network object while
-     remaining compatible with older backups that omit it.
+- 单节点测速始终使用 TCP 直连，只更新目标节点，不再触发整组内核测速。
+- 全节点测速继续遵循“智能 / 直连 / 内核”设置；内核模式仍使用整组 `urlTest(groupTag)`。
+- 已补充单元测试，覆盖内核模式下的单节点直连与全节点策略保留。
 
-### Current changed files
+## 已知问题与注意事项
 
-- `android/app/build.gradle.kts`
-- `android/app/src/main/kotlin/com/flsing/flsing/MainActivity.kt`
-- `docs/Settings-Roadmap.md`
-- `docs/Codex-Handoff.md`
-- `lib/data/services/advanced_network_config_service.dart` (new)
-- `lib/data/services/advanced_network_settings.dart` (new)
-- `lib/data/services/app_settings.dart`
-- `lib/data/services/settings_backup_service.dart`
-- `lib/data/services/sing_box_service.dart`
-- `lib/providers/app_state.dart`
-- `lib/ui/pages/advanced_network_page.dart` (new)
-- `lib/ui/pages/settings_page.dart`
-- `test/advanced_network_config_service_test.dart` (new)
+- T2 的 Android 原生 `Libbox.checkConfig` 通道与实际 VPN 行为仍应继续真机验证，特别是手动 DoH/DoT、三种 TUN 协议栈、排除路由、重载与备份恢复。
+- 路由策略需真机验证：三种 IP 模式、常用规则、自定义规则排序、切换不同订阅后的 outbound 校验，以及连接中保存后的 VPN 重载。
+- `independent_cache`、入站 `sniff` 与 `sniff_override_destination` 在更高 sing-box 版本已废弃；当前固定的 libbox 1.13.14 仍可用。升级内核时先做兼容性审查。
+- 系统 HTTP 代理依赖订阅提供的 `tun.platform.http_proxy`；外部导入配置不一定兼容。
+- 设置恢复仍复用通用配置文件选择器，原生系统选择器不会专门过滤备份 JSON。
 
-## Important Caveats
+## T2 下一步
 
-- T2 phase 1 has not been Gradle-compiled or exercised on Android because local
-  APK builds still require explicit permission. The Dart patcher is unit-tested,
-  but the native `Libbox.checkConfig` channel needs device verification.
-- `independent_cache`, inbound `sniff`, and `sniff_override_destination` are
-  deprecated by newer sing-box schemas. They remain supported by the pinned
-  1.13.14 core and are protected by runtime core validation; revisit them when
-  upgrading libbox.
-- `flutter_sing_box` v1.1.4 has `builder.allowBypass()` commented out in its Android `VPNService`. Do not expose a VPN bypass switch: it will not work. The roadmap has been corrected accordingly.
-- System HTTP proxy is configuration-dependent. The bundled template supports it (`tun.platform.http_proxy` plus a local mixed inbound), but arbitrary imported configs may not.
-- `serviceReload()` causes a real plugin service restart. Settings pages correctly describe the short VPN interruption.
-- `SettingsBackupService` uses `ConfigurationFileImporter`, whose Android picker is also used for configuration import. It accepts JSON, but the user-facing native chooser is not specialized to backup files.
+1. 完成复杂 DNS 策略：规则分流、默认解析器、响应规则，以及复用路由编辑器模式的复杂规则表单。
+2. 实现自动选优参数：`urltest` URL、间隔、容差与自动组默认节点；手动测速保持独立。
+3. 实现日志级别、DNS/规则缓存控制、规则集更新周期、内核缓存维护和手动更新通道选择。
 
-## Subscription Usage Investigation
+## 设置实现约束
 
-- The UI now maps `Profile.userInfo` to `SubscriptionItem` and conditionally renders usage and expiry in `lib/ui/pages/subscription_sheet.dart`.
-- `SingBoxService` parses the standard `subscription-userinfo` header for its custom share-link parser; the plugin handles it for its own profile-import branch.
-- A phone screenshot showed no usage data. No conclusion was reached because the working-tree source was not built/installed. The user believes their providers may vary the response based on client User-Agent.
-- This issue is explicitly deferred. Do not add an automatic User-Agent spoof without first capturing sanitized response headers or receiving a user decision.
-
-## Settings Roadmap
-
-`docs/Settings-Roadmap.md` is the authoritative T0-T3 plan.
-
-- T0: complete in the committed baseline.
-- T1: accepted and committed in `13383af`. VPN bypass remains a plugin dependency, not an app UI item.
-- T2 phase 1: DNS/TUN overrides and the validated local override pipeline are implemented in the current worktree.
-- T2 next: route rules, complex DNS/response rules, URL-test tuning, log/cache controls, a manual update channel selector, and core maintenance.
-- T3: root redirect, local proxy-service mode, transport tuning, Clash API, raw config editor, memory controls, and Shizuku.
-
-## Verification Already Run
-
-After the current T2 phase-1 changes:
-
-```powershell
-flutter analyze
-flutter test
-git diff --check
-```
-
-Results:
-
-- `flutter analyze`: no issues.
-- Full test suite: 19 tests passed (including 8 new advanced-network tests).
-- `git diff --check`: no whitespace errors.
-
-No APK build, Gradle compilation, installation, commit, push, release, or tag operation was performed after the T2 edits.
-
-## Suggested Continuation
-
-1. Review the T2 phase-1 diff and, when authorized, build/install a device APK
-   to verify FLsing/default/manual DNS, invalid DNS rejection, all three TUN
-   stacks, route exclusions, connected reload, reset, and backup round-trip.
-2. Implement route rules and complex DNS rules on top of the validated patch
-   pipeline after phase-1 device checks pass.
-3. Resolve subscription usage/expiry only with sanitized captured response
-   metadata; do not add automatic User-Agent spoofing.
+- 每项设置必须明确“立即生效 / 重载 VPN / 下次连接 / 重启应用”中的一种，不能只写入而不生效。
+- 高风险覆写先生成候选配置并校验；失败不能替换当前可用 `using_config`。
+- 高级能力应放在二级或三级页面，默认保持订阅配置；不要为简化 UI 删除已有能力。
+- 不实现多语言应用 UI；当前设置文案维持中文。
+- 不实现自动更新检查、下载或安装；更新只能由用户从“设置 → 关于 → 版本”手动发起。

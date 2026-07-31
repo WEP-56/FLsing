@@ -7,6 +7,7 @@ import '../../data/services/advanced_network_settings.dart';
 import '../../data/services/app_settings.dart';
 import '../../providers/app_state.dart';
 import '../widgets/app_surfaces.dart';
+import 'route_settings_page.dart';
 
 class AdvancedNetworkPage extends StatefulWidget {
   const AdvancedNetworkPage({super.key});
@@ -44,6 +45,18 @@ class _AdvancedNetworkPageState extends State<AdvancedNetworkPage> {
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _open(const _TunSettingsPage()),
+              ),
+              ListTile(
+                leading: const Icon(Icons.alt_route),
+                title: const Text('路由策略'),
+                subtitle: Text(
+                  settings.route.enabled
+                      ? '${settings.route.rules.where((rule) => rule.enabled).length} 条自定义规则'
+                      : '使用订阅配置',
+                  style: _subtle(context),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _open(const RouteSettingsPage()),
               ),
             ],
           ),

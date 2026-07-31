@@ -171,6 +171,28 @@ class SingBoxService {
 
   Future<String> singBoxVersion() => _client.getSingBoxVersion();
 
+  Future<List<String>> availableOutboundTags() async {
+    try {
+      final usingConfig = await ProfileStorage().getUsingConfig();
+      final sourcePath = selectedProfile?.typed.path;
+      final source = sourcePath == null ? usingConfig : io.File(sourcePath);
+      if (!await source.exists()) return const [];
+      final value = jsonDecode(await source.readAsString());
+      if (value is! Map<String, dynamic> || value['outbounds'] is! List) {
+        return const [];
+      }
+      return (value['outbounds'] as List)
+          .whereType<Map>()
+          .map((outbound) => outbound['tag'])
+          .whereType<String>()
+          .where((tag) => tag.isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// 持久化的代理模式（ClashMode 常量值）。
   String get preferredMode => AppSettings().clashMode;
 
@@ -229,8 +251,10 @@ class SingBoxService {
     AdvancedNetworkSettings? advancedSettingsOverride,
   }) async {
     final file = await ProfileStorage().getUsingConfig();
-    if (!await file.exists()) return false;
-    final dynamic config = jsonDecode(await file.readAsString());
+    final sourcePath = selectedProfile?.typed.path;
+    final source = sourcePath == null ? file : io.File(sourcePath);
+    if (!await source.exists()) return false;
+    final dynamic config = jsonDecode(await source.readAsString());
     if (config is! Map<String, dynamic>) return false;
 
     final patchedConfig = _advancedNetwork.apply(
