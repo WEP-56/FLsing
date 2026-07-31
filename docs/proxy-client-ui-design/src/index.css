@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+/* ============================== theme tokens ============================== */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page: #000000;
+  --frame: #101010;
+  --frame-bd: rgba(255, 255, 255, 0.08);
+  --sheet: #0b0b0b;
+  --dialog: #151515;
+  --menu: rgba(22, 22, 22, 0.95);
+  --toast: rgba(26, 26, 26, 0.95);
+  --toast-fg: rgba(255, 255, 255, 0.88);
+  --stage: #060606;
+
+  --t1: rgba(255, 255, 255, 0.93);
+  --t2: rgba(255, 255, 255, 0.72);
+  --t3: rgba(255, 255, 255, 0.55);
+  --t4: rgba(255, 255, 255, 0.4);
+  --t5: rgba(255, 255, 255, 0.3);
+  --t6: rgba(255, 255, 255, 0.2);
+
+  --sf0: rgba(255, 255, 255, 0.028);
+  --sf1: rgba(255, 255, 255, 0.048);
+  --sf2: rgba(255, 255, 255, 0.07);
+  --sf3: rgba(255, 255, 255, 0.12);
+
+  --bd1: rgba(255, 255, 255, 0.07);
+  --bd2: rgba(255, 255, 255, 0.12);
+  --bd3: rgba(255, 255, 255, 0.25);
+
+  --inv-bg: #ffffff;
+  --inv-fg: #000000;
+  --knob-off: #8d8d8d;
+
+  --accent: #30d158;
+  --accent-soft: rgba(48, 209, 88, 0.13);
+  --warn: #f0b13c;
+  --danger: #f0524f;
+  --danger-soft: rgba(240, 82, 79, 0.15);
+
+  --globe-core: rgba(0, 0, 0, 0.55);
+  --sheen: rgba(255, 255, 255, 0.045);
+  --shadow-menu: 0 16px 44px rgba(0, 0, 0, 0.65);
+  --shadow-dialog: 0 24px 70px rgba(0, 0, 0, 0.7);
+  --shadow-frame: 0 60px 140px -40px rgba(0, 0, 0, 0.95);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --page: #eae8e3;
+  --frame: #d5d2ca;
+  --frame-bd: rgba(26, 25, 21, 0.12);
+  --sheet: #f4f3ef;
+  --dialog: #faf9f6;
+  --menu: rgba(250, 249, 246, 0.96);
+  --toast: rgba(32, 31, 26, 0.94);
+  --toast-fg: rgba(255, 255, 255, 0.92);
+  --stage: #dedbd4;
+
+  --t1: rgba(26, 25, 21, 0.92);
+  --t2: rgba(26, 25, 21, 0.7);
+  --t3: rgba(26, 25, 21, 0.56);
+  --t4: rgba(26, 25, 21, 0.45);
+  --t5: rgba(26, 25, 21, 0.35);
+  --t6: rgba(26, 25, 21, 0.25);
+
+  --sf0: rgba(26, 25, 21, 0.03);
+  --sf1: rgba(26, 25, 21, 0.052);
+  --sf2: rgba(26, 25, 21, 0.075);
+  --sf3: rgba(26, 25, 21, 0.115);
+
+  --bd1: rgba(26, 25, 21, 0.09);
+  --bd2: rgba(26, 25, 21, 0.14);
+  --bd3: rgba(26, 25, 21, 0.28);
+
+  --inv-bg: #1e1d19;
+  --inv-fg: #f5f4f0;
+  --knob-off: #ffffff;
+
+  --accent: #178b3f;
+  --accent-soft: rgba(23, 139, 63, 0.13);
+  --warn: #a56a00;
+  --danger: #c0332c;
+  --danger-soft: rgba(192, 51, 44, 0.12);
+
+  --globe-core: rgba(255, 255, 255, 0.62);
+  --sheen: rgba(255, 255, 255, 0.55);
+  --shadow-menu: 0 16px 40px rgba(26, 25, 21, 0.16);
+  --shadow-dialog: 0 24px 64px rgba(26, 25, 21, 0.2);
+  --shadow-frame: 0 60px 140px -46px rgba(26, 25, 21, 0.42);
+}
+
+/* ================================= base ================================= */
+
+html,
+body {
+  margin: 0;
+  background: var(--stage);
+  font-family:
+    "Inter",
+    "Noto Sans SC",
+    system-ui,
+    -apple-system,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+  transition: background-color 0.4s ease;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* ============================ semantic helpers ============================ */
+
+@layer utilities {
+  .t1 { color: var(--t1); }
+  .t2 { color: var(--t2); }
+  .t3 { color: var(--t3); }
+  .t4 { color: var(--t4); }
+  .t5 { color: var(--t5); }
+  .t6 { color: var(--t6); }
+
+  .sf0 { background-color: var(--sf0); }
+  .sf1 { background-color: var(--sf1); }
+  .sf2 { background-color: var(--sf2); }
+  .sf3 { background-color: var(--sf3); }
+
+  .bd1 { border-color: var(--bd1); }
+  .bd2 { border-color: var(--bd2); }
+  .bd3 { border-color: var(--bd3); }
+
+  .hov:hover { background-color: var(--sf3); }
+  .hov-t:hover { color: var(--t1); }
+  .act:active { background-color: var(--sf2); }
+
+  .inv { background-color: var(--inv-bg); color: var(--inv-fg); }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--bd3);
+  outline-offset: 2px;
+}
+
+input {
+  font-family: inherit;
+}

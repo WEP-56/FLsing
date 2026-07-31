@@ -34,6 +34,9 @@ class AppState extends ChangeNotifier {
   static const _tcpProbeTimeout = Duration(seconds: 5);
   static const _tcpProbeConcurrency = 8;
   static const _maxRetainedLogs = 600;
+
+  /// 连接中切换节点 / 模式 / 订阅后，隧道重新收敛所需的短暂过渡期。
+  static const _transitionSettle = Duration(milliseconds: 600);
   static const _reconnectDelays = <Duration>[
     Duration(seconds: 2),
     Duration(seconds: 4),
@@ -71,6 +74,13 @@ class AppState extends ChangeNotifier {
   String? _feedback;
   bool _initializing = false;
   bool _initialized = false;
+
+  /// > 0 时丢弃 groupStream 事件。订阅切换 / 内核重载期间，旧配置仍会
+  /// 推送分组（组名与新配置相同），会把刚载入的新节点列表覆盖回去。
+  int _groupEventSuspensions = 0;
+
+  /// 递增序号，丢弃过期的 _loadConfiguredNodes 结果（快速连续切换订阅时）。
+  int _nodeLoadSeq = 0;
 
   ConnectionPhase get phase => _phase;
   ProxyMode get mode => _mode;
@@ -291,11 +301,15 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> selectMode(ProxyMode mode) async {
+    if (mode == _mode) return;
     final previous = _mode;
     _mode = mode;
     notifyListeners();
+    final wasConnected = isConnected;
     try {
-      await _service.setMode(_pluginMode(mode), connected: isConnected);
+      await _runConnectedTransition(
+        () => _service.setMode(_pluginMode(mode), connected: wasConnected),
+      );
       if (isConnected) unawaited(refreshIpInfo());
     } catch (error) {
       _mode = previous;
@@ -350,7 +364,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> selectNode(String id) async {
-    if (_activeGroupTag == null) return;
+    if (_activeGroupTag == null || id == _selectedNodeId) return;
     final previous = _selectedNodeId;
     _selectedNodeId = id;
     notifyListeners();
@@ -359,12 +373,18 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _groupEventSuspensions++;
     try {
-      await _service.selectOutbound(groupTag: _activeGroupTag!, nodeTag: id);
+      await _runConnectedTransition(
+        () => _service.selectOutbound(groupTag: _activeGroupTag!, nodeTag: id),
+      );
+      unawaited(refreshIpInfo(settleDelay: const Duration(milliseconds: 800)));
     } catch (error) {
       _selectedNodeId = previous;
       _feedback = '切换节点失败：$error';
       notifyListeners();
+    } finally {
+      _groupEventSuspensions--;
     }
   }
 
@@ -556,9 +576,8 @@ class AppState extends ChangeNotifier {
     }
     try {
       final profile = await _service.importSubscription(url: uri, name: name);
-      _reloadProfiles();
       _activeSubscriptionId = profile.id.toString();
-      await _loadConfiguredNodes();
+      await _applyProfileChange(reloadRunning: true);
       _feedback = '订阅已导入';
       notifyListeners();
       return true;
@@ -575,9 +594,8 @@ class AppState extends ChangeNotifier {
         file: file,
         name: file.uri.pathSegments.last,
       );
-      _reloadProfiles();
       _activeSubscriptionId = profile.id.toString();
-      await _loadConfiguredNodes();
+      await _applyProfileChange(reloadRunning: true);
       _feedback = '配置文件已导入';
       notifyListeners();
       return true;
@@ -600,8 +618,7 @@ class AppState extends ChangeNotifier {
     if (profile == null || uri == null || !uri.hasScheme) return;
     await _runWithFeedback(() async {
       await _service.updateProfile(profile, name: name, url: uri);
-      _reloadProfiles();
-      await _loadConfiguredNodes();
+      await _applyProfileChange(reloadRunning: id == _activeSubscriptionId);
     }, failurePrefix: '更新订阅失败');
   }
 
@@ -617,11 +634,9 @@ class AppState extends ChangeNotifier {
     for (var attempt = 0; attempt <= retryCount; attempt++) {
       try {
         await _service.refreshProfile(profile);
-        _reloadProfiles();
-        await _loadConfiguredNodes();
-        if (isConnected && profile.id.toString() == _activeSubscriptionId) {
-          await _service.reloadService();
-        }
+        await _applyProfileChange(
+          reloadRunning: profile.id.toString() == _activeSubscriptionId,
+        );
         AppSettings().lastSubscriptionUpdateError = null;
         if (!automatic) _feedback = '订阅已更新';
         notifyListeners();
@@ -642,24 +657,63 @@ class AppState extends ChangeNotifier {
 
   Future<void> activateSubscription(String id) async {
     final parsed = int.tryParse(id);
-    if (parsed == null) return;
+    if (parsed == null || id == _activeSubscriptionId) return;
     await _runWithFeedback(() async {
       await _service.selectProfile(parsed);
-      _reloadProfiles();
-      await _loadConfiguredNodes();
-      if (isConnected) await _service.reloadService();
+      await _applyProfileChange(reloadRunning: true);
     }, failurePrefix: '启用订阅失败');
   }
 
   Future<void> deleteSubscription(String id) async {
     final parsed = int.tryParse(id);
     if (parsed == null || _profiles.length <= 1) return;
+    final wasActive = id == _activeSubscriptionId;
     await _runWithFeedback(() async {
       await _service.deleteProfile(parsed);
+      // 删除的是非启用订阅时不打扰运行中的隧道。
+      await _applyProfileChange(reloadRunning: wasActive);
+    }, failurePrefix: '删除订阅失败');
+  }
+
+  /// 订阅集合变化后的统一收尾：重读订阅列表、从新配置载入节点，并在
+  /// 需要时重载运行中的内核。全程挂起 groupStream —— 重载完成前旧配置
+  /// 仍会推送分组事件（组名与新配置相同），会把节点列表覆盖回旧订阅。
+  Future<void> _applyProfileChange({required bool reloadRunning}) async {
+    _groupEventSuspensions++;
+    try {
       _reloadProfiles();
       await _loadConfiguredNodes();
-      if (isConnected) await _service.reloadService();
-    }, failurePrefix: '删除订阅失败');
+      notifyListeners();
+      if (reloadRunning && isConnected) {
+        await _runConnectedTransition(() => _service.reloadService());
+        unawaited(
+          refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)),
+        );
+      }
+    } finally {
+      _groupEventSuspensions--;
+    }
+  }
+
+  /// 已连接时执行会打断隧道的操作：先切到 connecting 相位，操作完成后
+  /// 留一小段收敛期再恢复 connected。期间若内核推送了真实状态事件
+  /// （如重载失败进入 stopped），以事件结果为准，不强行恢复。
+  Future<void> _runConnectedTransition(Future<void> Function() action) async {
+    if (!isConnected) {
+      await action();
+      return;
+    }
+    _phase = ConnectionPhase.connecting;
+    notifyListeners();
+    try {
+      await action();
+      await Future<void>.delayed(_transitionSettle);
+    } finally {
+      if (_phase == ConnectionPhase.connecting) {
+        _phase = ConnectionPhase.connected;
+      }
+      notifyListeners();
+    }
   }
 
   void _listenToNativeEvents() {
@@ -712,6 +766,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _onGroups(List<ClientGroup> groups) {
+    if (_groupEventSuspensions > 0) return;
     final activeGroup = _activeGroupTag == null
         ? null
         : groups
@@ -909,6 +964,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _loadConfiguredNodes() async {
+    final seq = ++_nodeLoadSeq;
     final id = _activeSubscriptionId;
     final profile = _service.profiles
         .where((item) => item.id.toString() == id)
@@ -920,6 +976,8 @@ class AppState extends ChangeNotifier {
       return;
     }
     final group = await _service.configuredNodeGroup(profile);
+    // 期间又发起了新的载入（快速连续切换订阅），丢弃本次结果。
+    if (seq != _nodeLoadSeq) return;
     if (group == null) return;
     _activeGroupTag = group.tag;
     _kernelTestTimes.clear();

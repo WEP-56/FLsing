@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// FLsing 动效常量。
@@ -40,17 +42,26 @@ class Motion {
 /// **重要**：只在首次挂载时播放一次。Web 版曾因组件在父级重渲染时
 /// 被重新创建而反复播放动画，Flutter 里用 StatefulWidget 持有
 /// controller 可天然避免。
+///
+/// 懒构建列表（ListView.builder 等）滚动时才创建远处的项，若仍按
+/// `index * stagger` 延迟，第 N 项要等 N 份延迟才浮现。传入 [epoch]
+///（列表首帧时刻）后，超出首屏批次窗口才构建的项直接显示。
 class StaggeredEntrance extends StatefulWidget {
   const StaggeredEntrance({
     super.key,
     required this.index,
     required this.child,
+    this.epoch,
     this.offset = 16,
     this.duration = Motion.slow,
   });
 
   final int index;
   final Widget child;
+
+  /// 所属列表首帧出现的时刻；null 表示总是播放入场动画。
+  final DateTime? epoch;
+
   final double offset;
   final Duration duration;
 
@@ -60,6 +71,12 @@ class StaggeredEntrance extends StatefulWidget {
 
 class _StaggeredEntranceState extends State<StaggeredEntrance>
     with SingleTickerProviderStateMixin {
+  /// 首屏批次窗口：晚于该窗口构建的项视为滚动进入，立即显示。
+  static const _cohortWindow = Duration(milliseconds: 150);
+
+  /// 错峰延迟封顶——首屏可见项之外不再累加延迟。
+  static const _maxStaggerSteps = 10;
+
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: widget.duration,
@@ -72,7 +89,13 @@ class _StaggeredEntranceState extends State<StaggeredEntrance>
   @override
   void initState() {
     super.initState();
-    final delay = Motion.stagger * widget.index + const Duration(milliseconds: 40);
+    final epoch = widget.epoch;
+    if (epoch != null && DateTime.now().difference(epoch) > _cohortWindow) {
+      _c.value = 1;
+      return;
+    }
+    final steps = math.min(math.max(widget.index, 0), _maxStaggerSteps);
+    final delay = Motion.stagger * steps + const Duration(milliseconds: 40);
     Future.delayed(delay, () {
       if (mounted) _c.forward();
     });
