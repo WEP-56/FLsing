@@ -799,8 +799,7 @@ class AppState extends ChangeNotifier {
         _phase = ConnectionPhase.disconnecting;
       case ProxyState.stopped:
       case ProxyState.unknown:
-        _connectionTimer?.cancel();
-        _connectedFor = Duration.zero;
+        _stopConnectionTimer();
         _phase = ConnectionPhase.disconnected;
         if (previous == ConnectionPhase.connected ||
             previous == ConnectionPhase.disconnecting) {
@@ -1110,10 +1109,17 @@ class AppState extends ChangeNotifier {
   }
 
   void _startTimer() {
-    _connectionTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+    if (_connectionTimer?.isActive == true) return;
+    _connectionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _connectedFor += const Duration(seconds: 1);
       notifyListeners();
     });
+  }
+
+  void _stopConnectionTimer() {
+    _connectionTimer?.cancel();
+    _connectionTimer = null;
+    _connectedFor = Duration.zero;
   }
 
   String _pluginMode(ProxyMode mode) => switch (mode) {

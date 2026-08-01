@@ -73,6 +73,7 @@ void main() {
     expect(service.groupTestCount, 0);
     expect(state.nodes.firstWhere((node) => node.id == 'node-a').latency, 73);
     expect(state.nodes.firstWhere((node) => node.id == 'node-b').latency, null);
+    await Future<void>.delayed(const Duration(milliseconds: 1300));
   });
 
   test('all-node test still respects the proxy test setting', () async {
@@ -83,6 +84,17 @@ void main() {
     expect(probes, isEmpty);
     expect(service.groupTestCount, 0);
     expect(state.takeFeedback(), '代理测速需要先连接');
+  });
+
+  test('connection timer restarts after reconnecting', () async {
+    proxyStates.add(ProxyState.started);
+    await Future<void>.delayed(Duration.zero);
+    proxyStates.add(ProxyState.stopped);
+    await Future<void>.delayed(Duration.zero);
+    proxyStates.add(ProxyState.started);
+    await Future<void>.delayed(const Duration(milliseconds: 1300));
+
+    expect(state.connectedFor.inSeconds, greaterThanOrEqualTo(1));
   });
 }
 
