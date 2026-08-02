@@ -87,8 +87,9 @@ class SingBoxService {
   Future<Profile> importSubscription({
     required Uri url,
     required String name,
+    String? userAgent,
   }) async {
-    final response = await _fetchSubscription(url);
+    final response = await _fetchSubscription(url, userAgent: userAgent);
     final nodes = SubscriptionParser.parse(response.body);
     late final Profile profile;
     if (nodes != null) {
@@ -105,8 +106,10 @@ class SingBoxService {
       profile = await ProfileService().importProfile(
         subscribeLink: url,
         name: name,
+        userAgent: userAgent,
       );
     }
+    AppSettings().setSubscriptionUserAgentFor(profile.id, userAgent);
     await _activateProfile(profile);
     return profile;
   }
@@ -135,10 +138,11 @@ class SingBoxService {
   }
 
   Future<Profile> refreshProfile(Profile profile) async {
+    final userAgent = AppSettings().subscriptionUserAgentFor(profile.id);
     final link = Uri.tryParse(profile.typed.subscribeUrl ?? '');
     late final Profile updated;
     if (link != null && (link.scheme == 'http' || link.scheme == 'https')) {
-      final response = await _fetchSubscription(link);
+      final response = await _fetchSubscription(link, userAgent: userAgent);
       final nodes = SubscriptionParser.parse(response.body);
       if (nodes != null) {
         updated = await _saveParsedProfile(
@@ -150,10 +154,16 @@ class SingBoxService {
           existingId: profile.id,
         );
       } else {
-        updated = await ProfileService().importProfile(id: profile.id);
+        updated = await ProfileService().importProfile(
+          id: profile.id,
+          userAgent: userAgent,
+        );
       }
     } else {
-      updated = await ProfileService().importProfile(id: profile.id);
+      updated = await ProfileService().importProfile(
+        id: profile.id,
+        userAgent: userAgent,
+      );
     }
     if (selectedProfile?.id == updated.id) await _activateProfile(updated);
     return updated;
@@ -163,9 +173,11 @@ class SingBoxService {
     Profile profile, {
     required String name,
     required Uri url,
+    String? userAgent,
   }) async {
     profile.name = name;
     profile.typed.subscribeUrl = url.toString();
+    AppSettings().setSubscriptionUserAgentFor(profile.id, userAgent);
     ProfileStorage().updateProfile(profile);
     return refreshProfile(profile);
   }
@@ -179,6 +191,7 @@ class SingBoxService {
   Future<void> deleteProfile(int id) async {
     final wasSelected = selectedProfile?.id == id;
     ProfileStorage().deleteProfile(id);
+    AppSettings().setSubscriptionUserAgentFor(id, null);
     if (wasSelected) {
       final next = selectedProfile;
       if (next != null) await _activateProfile(next);
@@ -405,14 +418,17 @@ class SingBoxService {
     }
   }
 
-  Future<http.Response> _fetchSubscription(Uri url) async {
+  Future<http.Response> _fetchSubscription(
+    Uri url, {
+    String? userAgent,
+  }) async {
     final response = await http
         .get(
           url,
-          headers: const {
+          headers: {
             'Accept':
                 'application/json, application/yaml;q=0.9, text/plain;q=0.8',
-            'User-Agent': 'FLsing/1.0',
+            'User-Agent': userAgent ?? 'FLsing/1.0',
           },
         )
         .timeout(const Duration(seconds: 20));

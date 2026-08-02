@@ -14,6 +14,7 @@ import '../../data/services/per_app_proxy_service.dart';
 import '../../data/services/platform_settings_service.dart';
 import '../../data/services/settings_backup_service.dart';
 import '../../models/app_models.dart';
+import '../../models/user_agents.dart';
 import '../../providers/app_state.dart';
 import '../../providers/theme_provider.dart';
 import 'advanced_network_page.dart';
@@ -110,7 +111,7 @@ class _SettingsHome extends StatelessWidget {
         const _CategoryTile(
           icon: Icons.tune_rounded,
           title: '高级设置',
-          subtitle: '测速与测试链接',
+          subtitle: '测速、测试链接与订阅 UA',
           section: _SettingsSection.advanced,
         ),
         _CategoryTile(
@@ -612,6 +613,25 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
                 color: FlsingColors.of(context).text3,
               ),
               onTap: () => _editTestUrl(settings),
+            ),
+          ],
+        ),
+        _SectionLabel('订阅请求'),
+        _SettingsGroup(
+          children: [
+            ListTile(
+              title: const Text('User-Agent 列表'),
+              subtitle: Text(
+                '预设与自定义 UA，在添加或编辑订阅时按订阅绑定',
+                style: _subtle(context),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: FlsingColors.of(context).text4,
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const _UserAgentPage()),
+              ),
             ),
           ],
         ),
@@ -1216,6 +1236,186 @@ class _ApplicationSelectorPageState extends State<_ApplicationSelectorPage> {
     setState(() {
       if (!_selected.add(packageName)) _selected.remove(packageName);
     });
+  }
+}
+
+class _UserAgentPage extends StatefulWidget {
+  const _UserAgentPage();
+
+  @override
+  State<_UserAgentPage> createState() => _UserAgentPageState();
+}
+
+class _UserAgentPageState extends State<_UserAgentPage> {
+  @override
+  Widget build(BuildContext context) {
+    final c = FlsingColors.of(context);
+    final customs = AppSettings().customUserAgents;
+    final subtle = TextStyle(color: c.text4, fontSize: 13);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 660),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      CircleIconButton(
+                        icon: Icons.arrow_back,
+                        tooltip: '返回',
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'User-Agent 列表',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: '添加自定义 UA',
+                        icon: const Icon(Icons.add),
+                        onPressed: _addCustom,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        _SectionLabel('自定义'),
+                        _SettingsGroup(
+                          children: [
+                            if (customs.isEmpty)
+                              ListTile(
+                                title: Text('还没有自定义 UA', style: subtle),
+                                subtitle: Text('点右上角 + 添加', style: subtle),
+                              )
+                            else
+                              for (final value in customs)
+                                ListTile(
+                                  title: Text(
+                                    value,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  trailing: IconButton(
+                                    tooltip: '删除',
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: c.text3,
+                                    ),
+                                    onPressed: () => _removeCustom(value),
+                                  ),
+                                  onTap: () => _copy(value),
+                                ),
+                          ],
+                        ),
+                        _SectionLabel('预设'),
+                        _SettingsGroup(
+                          children: [
+                            for (final preset in kUserAgentPresets)
+                              ListTile(
+                                title: Text(preset.label),
+                                subtitle: Text(
+                                  preset.value,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: subtle,
+                                ),
+                                onTap: () => _copy(preset.value),
+                              ),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 10, 4, 16),
+                          child: Text(
+                            'UA 在添加或编辑订阅时选择并绑定到该订阅，不影响其他请求。'
+                            '从列表删除自定义 UA 不会改变已绑定的订阅。',
+                            style: TextStyle(fontSize: 12, color: c.text5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _copy(String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    showAppMessage('UA 已复制');
+  }
+
+  void _removeCustom(String value) {
+    final settings = AppSettings();
+    settings.customUserAgents = settings.customUserAgents
+        .where((item) => item != value)
+        .toList();
+    setState(() {});
+    showAppMessage('已从列表移除，已绑定此 UA 的订阅不受影响');
+  }
+
+  Future<void> _addCustom() async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('自定义 User-Agent'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'User-Agent',
+              hintText: '例如 MyClient/1.0',
+            ),
+            validator: (value) {
+              final trimmed = value?.trim() ?? '';
+              if (!isValidUserAgentValue(trimmed)) {
+                return '仅支持可见 ASCII 字符，长度不超过 512';
+              }
+              final exists =
+                  AppSettings().customUserAgents.contains(trimmed) ||
+                  kUserAgentPresets.any((preset) => preset.value == trimmed);
+              return exists ? '列表里已经有这个 UA 了' : null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final settings = AppSettings();
+    settings.customUserAgents = [
+      ...settings.customUserAgents,
+      controller.text.trim(),
+    ];
+    if (mounted) setState(() {});
   }
 }
 

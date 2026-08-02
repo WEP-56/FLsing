@@ -100,6 +100,53 @@ class AppSettings {
 
   set testUrl(String value) => _store.setString(_Keys.testUrl, value.trim());
 
+  /// 用户自定义的订阅 User-Agent（预设之外的部分）。
+  List<String> get customUserAgents {
+    final raw = _store.getString(_Keys.customUserAgents);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final value = jsonDecode(raw);
+      return value is List
+          ? value.whereType<String>().toList(growable: false)
+          : const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  set customUserAgents(List<String> value) =>
+      _store.setString(_Keys.customUserAgents, jsonEncode(value));
+
+  /// 订阅绑定的 User-Agent（profileId → UA 原文）。绑定存原文而不是列表
+  /// 索引，从列表里删除某个 UA 不影响已绑定的订阅。null 表示默认 UA。
+  String? subscriptionUserAgentFor(int profileId) {
+    final value = _subscriptionUserAgents['$profileId'];
+    return (value == null || value.isEmpty) ? null : value;
+  }
+
+  void setSubscriptionUserAgentFor(int profileId, String? userAgent) {
+    final map = _subscriptionUserAgents;
+    final trimmed = userAgent?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      if (map.remove('$profileId') == null) return;
+    } else {
+      map['$profileId'] = trimmed;
+    }
+    _store.setString(_Keys.subscriptionUserAgents, jsonEncode(map));
+  }
+
+  Map<String, String> get _subscriptionUserAgents {
+    final raw = _store.getString(_Keys.subscriptionUserAgents);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final value = jsonDecode(raw);
+      if (value is! Map<String, dynamic>) return {};
+      return value.map((key, item) => MapEntry(key, item.toString()));
+    } catch (_) {
+      return {};
+    }
+  }
+
   /// Internal authenticated Clash API port used for per-outbound URL tests.
   int get clashApiPort => _store.getInt(_Keys.clashApiPort);
   set clashApiPort(int value) => _store.setInt(_Keys.clashApiPort, value);
@@ -163,4 +210,6 @@ class _Keys {
   static const clashApiPort = 'clash_api_port';
   static const clashApiSecret = 'clash_api_secret';
   static const advancedNetworkSettings = 'advanced_network_settings';
+  static const customUserAgents = 'custom_user_agents';
+  static const subscriptionUserAgents = 'subscription_user_agents';
 }

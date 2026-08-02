@@ -656,6 +656,7 @@ class AppState extends ChangeNotifier {
   Future<bool> addSubscription({
     required String name,
     required String url,
+    String? userAgent,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) {
@@ -664,7 +665,11 @@ class AppState extends ChangeNotifier {
       return false;
     }
     try {
-      final profile = await _service.importSubscription(url: uri, name: name);
+      final profile = await _service.importSubscription(
+        url: uri,
+        name: name,
+        userAgent: userAgent,
+      );
       _activeSubscriptionId = profile.id.toString();
       await _applyProfileChange(reloadRunning: true);
       _feedback = '订阅已导入';
@@ -695,10 +700,19 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// 订阅绑定的 User-Agent；null 表示默认。
+  String? subscriptionUserAgent(String id) {
+    final parsed = int.tryParse(id);
+    return parsed == null
+        ? null
+        : AppSettings().subscriptionUserAgentFor(parsed);
+  }
+
   Future<void> editSubscription(
     String id, {
     required String name,
     required String url,
+    String? userAgent,
   }) async {
     final profile = _service.profiles
         .where((item) => item.id.toString() == id)
@@ -706,7 +720,12 @@ class AppState extends ChangeNotifier {
     final uri = Uri.tryParse(url);
     if (profile == null || uri == null || !uri.hasScheme) return;
     await _runWithFeedback(() async {
-      await _service.updateProfile(profile, name: name, url: uri);
+      await _service.updateProfile(
+        profile,
+        name: name,
+        url: uri,
+        userAgent: userAgent,
+      );
       await _applyProfileChange(reloadRunning: id == _activeSubscriptionId);
     }, failurePrefix: '更新订阅失败');
   }
@@ -1233,9 +1252,9 @@ class AppState extends ChangeNotifier {
   };
 
   String _sanitizeLog(String message) => message
-      .replaceAll(RegExp(r'https?://[^\\s]+', caseSensitive: false), '<url>')
+      .replaceAll(RegExp(r'https?://\S+', caseSensitive: false), '<url>')
       .replaceAll(
-        RegExp(r'(token|secret|password)=([^\\s&]+)', caseSensitive: false),
+        RegExp(r'(token|secret|password)=([^\s&]+)', caseSensitive: false),
         r'$1=<redacted>',
       );
 

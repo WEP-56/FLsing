@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 import '../../core/app_messenger.dart';
 import '../../core/motion.dart';
 import '../../core/theme/flsing_theme.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/configuration_file_importer.dart';
 import '../../models/app_models.dart';
+import '../../models/user_agents.dart';
 import '../../providers/app_state.dart';
 import '../widgets/flsing_sheets.dart';
 import 'node_sheet.dart' show formatDateTime;
@@ -432,6 +434,11 @@ class _SubscriptionFormDialogState extends State<_SubscriptionFormDialog> {
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
 
+  /// 选中的 User-Agent 原文；空串表示默认（哨兵值，Dropdown 不便用 null）。
+  late String _userAgent = widget.item == null
+      ? ''
+      : (widget.state.subscriptionUserAgent(widget.item!.id) ?? '');
+
   @override
   void dispose() {
     // 控制器归 State 管理，等对话框（含关闭动画）真正销毁后才释放。
@@ -440,21 +447,41 @@ class _SubscriptionFormDialogState extends State<_SubscriptionFormDialog> {
     super.dispose();
   }
 
+  /// 默认 + 预设 + 自定义；已绑定但不在列表里的 UA 也要能显示和保留。
+  List<({String label, String value})> get _userAgentOptions {
+    final options = <({String label, String value})>[
+      (label: '默认', value: ''),
+      for (final preset in kUserAgentPresets)
+        (label: preset.label, value: preset.value),
+      for (final custom in AppSettings().customUserAgents)
+        (label: custom, value: custom),
+    ];
+    if (_userAgent.isNotEmpty &&
+        !options.any((option) => option.value == _userAgent)) {
+      options.add((label: _userAgent, value: _userAgent));
+    }
+    final seen = <String>{};
+    return options.where((option) => seen.add(option.value)).toList();
+  }
+
   Future<void> _save() async {
     if (_saving || !(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _saving = true);
     final item = widget.item;
+    final userAgent = _userAgent.isEmpty ? null : _userAgent;
     var success = true;
     if (item == null) {
       success = await widget.state.addSubscription(
         name: _nameController.text.trim(),
         url: _urlController.text.trim(),
+        userAgent: userAgent,
       );
     } else {
       await widget.state.editSubscription(
         item.id,
         name: _nameController.text.trim(),
         url: _urlController.text.trim(),
+        userAgent: userAgent,
       );
     }
     final message = widget.state.takeFeedback();
@@ -466,6 +493,7 @@ class _SubscriptionFormDialogState extends State<_SubscriptionFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final c = FlsingColors.of(context);
     return AlertDialog(
       title: Text(widget.item == null ? '添加订阅' : '编辑订阅'),
       content: Form(
@@ -488,6 +516,32 @@ class _SubscriptionFormDialogState extends State<_SubscriptionFormDialog> {
                 final uri = Uri.tryParse(value?.trim() ?? '');
                 return uri != null && uri.hasScheme ? null : '请输入有效链接';
               },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _userAgent,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'User-Agent',
+                helperText: '部分订阅服务器按 UA 返回不同格式',
+              ),
+              items: [
+                for (final option in _userAgentOptions)
+                  DropdownMenuItem(
+                    value: option.value,
+                    child: Text(
+                      option.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: option.value.isEmpty
+                          ? null
+                          : TextStyle(color: c.text1),
+                    ),
+                  ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => _userAgent = value ?? ''),
             ),
           ],
         ),
