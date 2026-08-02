@@ -32,6 +32,14 @@ class SingBoxService {
   PlatformSettingsService get platformSettings =>
       _platformSettings ??= PlatformSettingsService();
   bool _initialized = false;
+  final List<String> _initializationWarnings = [];
+
+  /// 核心初始化（MMKV / 插件 / using_config 目录）是否已完成。
+  bool get isInitialized => _initialized || !io.Platform.isAndroid;
+
+  /// 初始化过程中非致命步骤的失败信息（规则集释放、配置修补、订阅激活）。
+  List<String> get initializationWarnings =>
+      List.unmodifiable(_initializationWarnings);
 
   Stream<ProxyState> get proxyStateStream => _client.proxyStateStream;
   Stream<List<ClientGroup>> get groupStream => _client.groupStream;
@@ -41,6 +49,9 @@ class SingBoxService {
   List<Profile> get profiles => ProfileStorage().getProfiles();
   Profile? get selectedProfile => ProfileStorage().getSelectedProfile();
 
+  /// 初始化分两级：MMKV / 插件通道 / using_config 目录是核心链路，失败时抛出；
+  /// 规则集释放、配置修补、订阅激活是尽力而为——它们失败只该影响连接能力，
+  /// 不能让已导入的订阅数据在 UI 上"消失"（数据本身一直在 MMKV 里）。
   Future<void> initialize() async {
     if (_initialized || !io.Platform.isAndroid) return;
     await MMKV.initialize();
@@ -50,12 +61,27 @@ class SingBoxService {
     final usingConfig = await ProfileStorage().getUsingConfig();
     await _recoverUsingConfig(usingConfig);
     ProfileStorage().setUsingConfig(usingConfig.parent.path);
-    await ruleSets.ensureInstalled();
-    // 已存在的 using_config 也补丁一次（本地规则集 + 默认模式）。
-    await _patchUsingConfig();
     _initialized = true;
+    _initializationWarnings.clear();
+    try {
+      await ruleSets.ensureInstalled();
+    } catch (error) {
+      _initializationWarnings.add('规则集释放失败：$error');
+    }
+    try {
+      // 已存在的 using_config 也补丁一次（本地规则集 + 固定默认模式）。
+      await _patchUsingConfig();
+    } catch (error) {
+      _initializationWarnings.add('修补当前配置失败：$error');
+    }
     final profile = selectedProfile;
-    if (profile != null) await _activateProfile(profile);
+    if (profile != null) {
+      try {
+        await _activateProfile(profile);
+      } catch (error) {
+        _initializationWarnings.add('激活订阅「${profile.name}」失败：$error');
+      }
+    }
   }
 
   Future<Profile> importSubscription({
@@ -200,15 +226,12 @@ class SingBoxService {
   /// 持久化的代理模式（ClashMode 常量值）。
   String get preferredMode => AppSettings().clashMode;
 
-  /// 切换代理模式。未连接时 native 侧没有模式列表会直接报错，
-  /// 所以只持久化并写进配置文件，等连接时生效。
+  /// 切换代理模式。未连接时 native 侧没有模式列表会直接报错，所以只持久化，
+  /// 连接后由 AppState 把偏好模式推送给内核（见 _patchUsingConfig 中
+  /// default_mode 固定为 rule 的说明）。
   Future<void> setMode(String mode, {required bool connected}) async {
     AppSettings().clashMode = mode;
-    if (connected) {
-      await _client.setClashMode(mode);
-    } else {
-      await _patchUsingConfig();
-    }
+    if (connected) await _client.setClashMode(mode);
   }
 
   /// 拉取最新规则集并让运行中的服务立即生效。
@@ -248,7 +271,7 @@ class SingBoxService {
   /// 对即将使用的配置做本地化修正：
   /// - 远程规则集改为内置/已下载的本地文件（远端地址在国内直连拉不动）；
   /// - 未识别的远程规则集下载改走代理；
-  /// - 写入持久化的默认代理模式；
+  /// - default_mode 固定为 rule（保证模式列表完整，偏好模式连接后另行推送）；
   /// - urltest 出站统一改用设置中的测速链接。
   Future<bool> _patchUsingConfig({
     bool? systemHttpProxyOverride,
@@ -272,7 +295,12 @@ class SingBoxService {
     final clashApiPort = await _ensureClashApiPort();
     clashApi['external_controller'] = '127.0.0.1:$clashApiPort';
     clashApi['secret'] = AppSettings().clashApiSecret;
-    clashApi['default_mode'] = preferredMode;
+    // 内核的模式列表 = default_mode + 路由/DNS 规则里引用过的 clash_mode。
+    // 模板规则只引用 global/direct，若把 default_mode 写成 global/direct，
+    // rule 就不在列表里，运行中无法再切回规则模式。固定写 rule 保证三种
+    // 模式始终可切换；用户偏好由 AppState 在连接建立后主动推送（同时覆盖
+    // cache.db 里持久化的旧模式）。
+    clashApi['default_mode'] = ClashMode.rule;
     experimental['clash_api'] = clashApi;
     patchedConfig['experimental'] = experimental;
 

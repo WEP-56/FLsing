@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flsing/data/services/app_settings.dart';
 import 'package:flsing/data/services/ip_service.dart';
 import 'package:flsing/data/services/sing_box_service.dart';
+import 'package:flsing/models/app_models.dart';
 import 'package:flsing/providers/app_state.dart';
 
 void main() {
@@ -14,6 +15,7 @@ void main() {
   late AppState state;
   late List<({String host, int port})> probes;
   late StreamController<ProxyState> proxyStates;
+  late StreamController<ClientClashMode> clashModes;
 
   setUp(() async {
     storage = _MemoryStorage();
@@ -22,6 +24,8 @@ void main() {
     service = _FakeSingBoxService();
     proxyStates = StreamController<ProxyState>.broadcast();
     service.proxyStates = proxyStates.stream;
+    clashModes = StreamController<ClientClashMode>.broadcast();
+    service.clashModes = clashModes.stream;
     probes = [];
     state = AppState(
       service: service,
@@ -37,6 +41,7 @@ void main() {
   tearDown(() async {
     state.dispose();
     await proxyStates.close();
+    await clashModes.close();
     AppSettings.setStorageForTesting(null);
   });
 
@@ -96,6 +101,60 @@ void main() {
 
     expect(state.connectedFor.inSeconds, greaterThanOrEqualTo(1));
   });
+
+  test('preferred mode is pushed to the core after connect', () async {
+    proxyStates.add(ProxyState.started);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    expect(service.modeSets, [(mode: ClashMode.rule, connected: true)]);
+    expect(state.mode, ProxyMode.rule);
+    await Future<void>.delayed(const Duration(milliseconds: 1300));
+  });
+
+  test('stale kernel mode during connect does not override preference', () async {
+    proxyStates.add(ProxyState.started);
+    await Future<void>.delayed(Duration.zero);
+    // cache.db 恢复的旧模式先于推送完成到达，不能把 UI 拉回全局。
+    clashModes.add(
+      ClientClashMode(
+        modes: ['Rule', 'global', 'direct'],
+        currentMode: 'global',
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    expect(state.mode, ProxyMode.rule);
+    expect(service.modeSets, [(mode: ClashMode.rule, connected: true)]);
+
+    // 推送窗口过后，内核事件恢复正常生效。
+    clashModes.add(
+      ClientClashMode(
+        modes: ['Rule', 'global', 'direct'],
+        currentMode: 'global',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(state.mode, ProxyMode.global);
+    await Future<void>.delayed(const Duration(milliseconds: 1300));
+  });
+
+  test('service init failure still lists stored subscriptions', () async {
+    final failing = _FakeSingBoxService()
+      ..failInitialize = true
+      ..proxyStates = const Stream.empty();
+    final appState = AppState(
+      service: failing,
+      ipService: _FakeIpService(),
+      tcpLatencyProbe: (host, port) async => null,
+    );
+    await appState.initialize();
+
+    expect(appState.isInitialized, isTrue);
+    expect(appState.subscriptions, hasLength(1));
+    expect(appState.nodes, hasLength(2));
+    expect(appState.takeFeedback(), contains('sing-box 初始化失败'));
+    appState.dispose();
+  });
 }
 
 class _FakeSingBoxService extends SingBoxService {
@@ -115,7 +174,10 @@ class _FakeSingBoxService extends SingBoxService {
   final Profile profile;
   int groupTestCount = 0;
   final List<String> outboundTests = [];
+  final List<({String mode, bool connected})> modeSets = [];
+  bool failInitialize = false;
   late Stream<ProxyState> proxyStates;
+  Stream<ClientClashMode> clashModes = const Stream.empty();
 
   @override
   Stream<ProxyState> get proxyStateStream => proxyStates;
@@ -124,7 +186,7 @@ class _FakeSingBoxService extends SingBoxService {
   Stream<List<ClientGroup>> get groupStream => const Stream.empty();
 
   @override
-  Stream<ClientClashMode> get clashModeStream => const Stream.empty();
+  Stream<ClientClashMode> get clashModeStream => clashModes;
 
   @override
   Stream<List<ClientLog>> get logStream => const Stream.empty();
@@ -139,7 +201,14 @@ class _FakeSingBoxService extends SingBoxService {
   String get preferredMode => ClashMode.rule;
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    if (failInitialize) throw StateError('init failed');
+  }
+
+  @override
+  Future<void> setMode(String mode, {required bool connected}) async {
+    modeSets.add((mode: mode, connected: connected));
+  }
 
   @override
   Future<ConfiguredNodeGroup?> configuredNodeGroup(Profile profile) async {

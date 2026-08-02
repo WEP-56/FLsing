@@ -80,10 +80,19 @@ class AppState extends ChangeNotifier {
   String? _feedback;
   bool _initializing = false;
   bool _initialized = false;
+  bool _disposed = false;
 
   /// > 0 时丢弃 groupStream 事件。订阅切换 / 内核重载期间，旧配置仍会
   /// 推送分组（组名与新配置相同），会把刚载入的新节点列表覆盖回去。
   int _groupEventSuspensions = 0;
+
+  /// > 0 时 clashModeStream 事件只记录不上屏。连接建立后向内核推送偏好
+  /// 模式期间，内核先回报的可能还是 cache.db 恢复的旧模式，不能让它把
+  /// UI 拉回去。
+  int _modeEventSuspensions = 0;
+
+  /// 内核最近一次回报的模式（含被抑制的事件），推送失败时用它回退 UI。
+  ProxyMode? _lastKernelMode;
 
   /// 正在进行的切换过渡数。过渡期相位短暂离开 connected，但内核仍在
   /// 运行，用它区分「真断开」和「切换中」。
@@ -257,23 +266,40 @@ class AppState extends ChangeNotifier {
     _initializing = true;
     notifyListeners();
     try {
-      await _service.initialize();
-      _mode = _modeFromPlugin(_service.preferredMode);
-      _reloadProfiles();
-      await _loadConfiguredNodes();
+      // 插件/内核初始化失败不等于数据丢失：订阅数据只依赖 MMKV（main()
+      // 已初始化），必须照常加载展示，否则用户会误以为订阅全没了。
+      Object? serviceError;
+      try {
+        await _service.initialize();
+      } catch (error) {
+        serviceError = error;
+      }
+      try {
+        _mode = _modeFromPlugin(_service.preferredMode);
+        _reloadProfiles();
+        await _loadConfiguredNodes();
+      } catch (error) {
+        _feedback = '读取订阅数据失败：$error';
+      }
       _listenToNativeEvents();
       _initialized = true;
-      if (AppSettings().autoUpdateSubscriptions) {
-        unawaited(_refreshStaleSubscriptions());
-      }
-      if (AppSettings().autoConnectOnLaunch &&
-          AppSettings().connectionRequested &&
-          hasSubscription) {
-        unawaited(toggleConnection());
+      if (serviceError != null) {
+        _lastError = 'sing-box 初始化失败：$serviceError';
+        _feedback = 'sing-box 初始化失败，连接时将自动重试：$serviceError';
+      } else {
+        if (_service.initializationWarnings.isNotEmpty) {
+          _feedback = _service.initializationWarnings.join('\n');
+        }
+        if (AppSettings().autoUpdateSubscriptions) {
+          unawaited(_refreshStaleSubscriptions());
+        }
+        if (AppSettings().autoConnectOnLaunch &&
+            AppSettings().connectionRequested &&
+            hasSubscription) {
+          unawaited(toggleConnection());
+        }
       }
       unawaited(refreshIpInfo());
-    } catch (error) {
-      _feedback = 'sing-box 初始化失败：$error';
     } finally {
       _initializing = false;
       notifyListeners();
@@ -286,6 +312,20 @@ class AppState extends ChangeNotifier {
       _feedback = '请先导入订阅';
       notifyListeners();
       return;
+    }
+    // 启动阶段初始化失败（如配置校验、规则集释放）后在这里重试，
+    // 成功前不发起连接。
+    if (!isConnected && !_service.isInitialized) {
+      try {
+        await _service.initialize();
+        _mode = _modeFromPlugin(_service.preferredMode);
+        _lastError = null;
+      } catch (error) {
+        _lastError = 'sing-box 初始化失败：$error';
+        _feedback = _lastError;
+        notifyListeners();
+        return;
+      }
     }
     try {
       if (isConnected) {
@@ -329,7 +369,7 @@ class AppState extends ChangeNotifier {
       if (isConnected) unawaited(refreshIpInfo());
     } catch (error) {
       _mode = previous;
-      _feedback = '切换模式失败：$error';
+      _feedback = _modeError(error, mode);
       notifyListeners();
     }
   }
@@ -443,7 +483,10 @@ class AppState extends ChangeNotifier {
       final delay = await _service.testOutbound(id);
       _replaceNode(id, latency: delay, testing: false, clearLatency: true);
     } catch (error) {
-      _feedback = '测速失败：$error';
+      final detail = error is PlatformException
+          ? (error.message ?? error.code)
+          : '$error';
+      _feedback = '测速失败：$detail';
     } finally {
       _markNodesTesting([id], testing: false);
       _singleKernelTesting = false;
@@ -791,6 +834,7 @@ class AppState extends ChangeNotifier {
         _cancelReconnect();
         _startTimer();
         unawaited(_applySelectionToRunningService());
+        unawaited(_applyModeToRunningService());
         // 隧道建立后路由需要片刻收敛，稍等再检测出口 IP。
         unawaited(
           refreshIpInfo(settleDelay: const Duration(milliseconds: 1200)),
@@ -902,7 +946,9 @@ class AppState extends ChangeNotifier {
   }
 
   void _onClashMode(ClientClashMode mode) {
-    _mode = _modeFromPlugin(mode.currentMode);
+    _lastKernelMode = _modeFromPlugin(mode.currentMode);
+    if (_modeEventSuspensions > 0) return;
+    _mode = _lastKernelMode!;
     notifyListeners();
   }
 
@@ -1066,6 +1112,27 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// 内核启动 / 重载后的模式来自 default_mode 或 cache.db 恢复值（可能是
+  /// 上次连接留下的旧模式），未必等于用户偏好，这里统一推送一次偏好模式。
+  Future<void> _applyModeToRunningService() async {
+    // 经 enum 往返一次，把历史遗留的大小写差异归一到当前常量值。
+    final preferred = _modeFromPlugin(_service.preferredMode);
+    _modeEventSuspensions++;
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!isConnected) return;
+      await _service.setMode(_pluginMode(preferred), connected: true);
+      _mode = preferred;
+    } catch (error) {
+      // 推送失败（如订阅配置不含对应 clash_mode 规则）时回退到内核实况。
+      _mode = _lastKernelMode ?? _mode;
+      _feedback = _modeError(error, preferred);
+    } finally {
+      _modeEventSuspensions--;
+      notifyListeners();
+    }
+  }
+
   ProxyNode _nodeFromGroupItem(
     ClientGroupItem item, {
     int? latency,
@@ -1128,6 +1195,19 @@ class AppState extends ChangeNotifier {
     ProxyMode.direct => ClashMode.direct,
   };
 
+  String _modeLabel(ProxyMode mode) => switch (mode) {
+    ProxyMode.rule => '规则',
+    ProxyMode.global => '全局',
+    ProxyMode.direct => '直连',
+  };
+
+  String _modeError(Object error, ProxyMode mode) {
+    if (error is PlatformException && error.code == 'INVALID_CLASH_MODE') {
+      return '当前订阅配置不支持「${_modeLabel(mode)}」模式';
+    }
+    return '切换模式失败：$error';
+  }
+
   String _connectionError(Object error) {
     final text = error.toString();
     if (text.contains('VPN_PERMISSION_DENIED')) return 'VPN 授权被拒绝';
@@ -1159,8 +1239,17 @@ class AppState extends ChangeNotifier {
         r'$1=<redacted>',
       );
 
+  /// 挂起的异步任务（IP 检测、模式推送等）可能在 dispose 后才完成，
+  /// 静默丢弃它们的通知，避免 use-after-dispose 断言。
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _connectionTimer?.cancel();
     _reconnectTimer?.cancel();
     _kernelTestTimer?.cancel();
