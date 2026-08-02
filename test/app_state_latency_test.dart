@@ -263,6 +263,10 @@ class _MemoryStorage implements KeyValueStorage {
       _values[key] as bool? ?? defaultValue;
 
   @override
+  double getDouble(String key, {double defaultValue = 0.0}) =>
+      _values[key] as double? ?? defaultValue;
+
+  @override
   int getInt(String key, {int defaultValue = 0}) =>
       _values[key] as int? ?? defaultValue;
 
@@ -280,20 +284,23 @@ class _MemoryStorage implements KeyValueStorage {
   }
 
   @override
-  bool setBool(String key, bool value) {
-    _values[key] = value;
-    return true;
-  }
+  bool setBool(String key, bool? value) => _setObject(key, value);
 
   @override
-  bool setInt(String key, int value) {
-    _values[key] = value;
-    return true;
-  }
+  bool setDouble(String key, double? value) => _setObject(key, value);
 
   @override
-  bool setString(String key, String value) {
-    _values[key] = value;
+  bool setInt(String key, int? value) => _setObject(key, value);
+
+  @override
+  bool setString(String key, String? value) => _setObject(key, value);
+
+  bool _setObject(String key, Object? value) {
+    if (value == null) {
+      _values.remove(key);
+    } else {
+      _values[key] = value;
+    }
     return true;
   }
 }

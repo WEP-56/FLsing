@@ -1,156 +1,162 @@
-# FLsing 开发交接
+# FLsing 开发交接（Agent 开场文档）
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
-本文件记录设置项进度、插件分支状态和当前开发主线。设置完整规划见 [Settings-Roadmap.md](Settings-Roadmap.md)。
+本文档是新会话 / 新 agent 的开场briefing：项目是什么、仓库怎么组织、哪些流程绝不能做错、当前进行到哪里。深入细节看对应文档：
 
-## 当前主线
+- 设置功能全景与优先级：[Settings-Roadmap.md](Settings-Roadmap.md)
+- 插件结构、运行链路、维护边界：`flutter_sing_box/docs/Android-Architecture.md`
+- 上游同步流程（remote/triage 三分类/合并/验证/lockfile 前移）：`flutter_sing_box/docs/Upstream-Sync.md`
+- 插件 API 用法（生命周期/配置/事件流/测速/宿主集成/验收）：`flutter_sing_box/example/guides/01~06`
 
-**任务主线已切换为：分支开发——内核通信能力增强。**
+## 一、项目是什么
 
-- T2 设置开发暂停，已完成的 DNS、TUN 和路由覆写保持现状，不继续扩展复杂 DNS。
-- 配置校验闭环已完成；后续继续在 `WEP-56/flutter_sing_box` 分支补齐稳定、可测试的 libbox 通信 API，再由 FLsing 消费。
-- `Libbox.checkConfig` 已从 FLsing 的 `MainActivity` 下沉到插件，应用层不再直接编译依赖 libbox。
+FLsing 是 Android 上的 Flutter + sing-box 代理客户端，面向日常用户，中文 UI。VPNService、内核通信、配置模型来自插件 `flutter_sing_box`。应用当前版本 1.2.6+7；插件版本自 1.1.5 起跟随上游版本号（「冻结 1.1.4」策略已作废）。插件工作区已同步上游 v1.1.5（libbox 1.13.15），但 FLsing 构建实际编译哪个插件版本以 `pubspec.lock` 的 `resolved-ref` 为准——当前仍锁在 `df98246`（1.1.4 / libbox 1.13.14），前移步骤见第六节状态表。
 
-## 协作与验证边界
+## 二、仓库结构与两仓关系（先读这节）
 
-- Codex 只执行 `flutter analyze`、`flutter test`、格式化和差异检查等基础代码验证。
-- APK 构建、安装、真机、真实网络、VPN 行为和其他复杂场景由用户执行。
-- 涉及复杂或真实环境验证时，Codex 仅提供简短、可操作的测试项，不代替用户执行。
+```
+D:\FLsing                    ← FLsing 应用仓库（git）
+├── flutter_sing_box\        ← 插件仓库（独立 git 工作区，被 FLsing 的 .gitignore 排除）
+│     remote: https://github.com/WEP-56/flutter_sing_box.git (master)
+├── example\                 ← UI 设计参考与 sing-box-for-android 源码（git 忽略，只读参考）
+├── lib\ / test\ / docs\     ← 应用代码、测试、文档
+└── pubspec.yaml             ← 插件以 git 依赖引入（url + ref: master）
+```
 
-## 最近验收记录
+关键事实：
 
-- 2026-07-31：GitHub Actions APK 构建通过。
-- 2026-07-31：真实手机安装、基础 VPN 连接和网络访问测试通过，未发现明显问题。
-- 2026-08-01：优先测试八项和高级网络七项全部通过，包括授权与生命周期、网络切换、通知、重载、手动 DoH/DoT、三种 TUN 栈、IP 模式和路由策略。
-- 2026-08-01：整组及非内核单节点测速正常；单 outbound 内核测速因 Android 禁止访问 `127.0.0.1` 明文 HTTP 失败，已补充精确 loopback 放行，待新包复测。
-- 2026-08-01：发现重连后连接计时偶发保持 `00:00:00`；根因为已取消的 Timer 未置空，已修复并补充回归测试，待新包复测。
-- 设置备份与恢复尚未进行真机验收。
+1. **FLsing 与插件是两个独立仓库**。不能在 FLsing 提交中混入插件源码，反之亦然。
+2. FLsing 通过 **git 依赖**消费插件，构建时代码取自 **pub 缓存里 `pubspec.lock` 锁定的那个提交**——不是本地 `flutter_sing_box\` 目录，也不是 GitHub master 最新。
+3. 本地 `flutter_sing_box\` 目录只用于开发插件本身；改完必须走「提交 → 推送 → 前移 lockfile」流程才会进入 FLsing 构建。
 
-## 当前状态
+## 三、依赖流程铁律（2026-08-02 锁文件事故复盘）
 
-| 阶段 | 状态 | 说明 |
-| --- | --- | --- |
-| T0 可靠性与诊断 | 已完成 | 已提交并通过既有验收。 |
-| T1 高频控制 | UI 与持久化完成 | 分应用代理在当前插件中的 Android 应用代码被注释，内核闭环转入插件主线修复。VPN bypass 不做。 |
-| T2 高级网络 | 第二阶段完成 | DNS、TUN、路由策略与安全本地覆写已实现；复杂 DNS、缓存等仍待开发。 |
-| T3 特权/专家能力 | 未开始 | 不应提前实现。 |
-| Android-only 插件分支 | 已提交并推送 | 提交 `316fdf5` 已补充单 outbound 测速、宿主应用命名和文档驱动 example，并清理旧示例资产。 |
-| 内核通信能力 | 第二阶段开发中 | 配置校验已迁移；单 outbound 内核测速的首轮真机问题已定位并修复，待新包复测。 |
+**事故经过**：修复"内核单节点测速 502"时，插件侧修复已提交并推送到 GitHub master（`df98246`），FLsing 侧修复也已提交。但 `pubspec.lock` 的 `resolved-ref` 仍锁在修复前的 `316fdf5`——`flutter pub get` 永远沿用锁定值，GitHub Actions 也执行 `pub get`，于是 CI 构建的 APK 一直编译旧插件，真机复测 502 依旧。用户与 agent 之间反复确认"插件代码是新的"（GitHub 上确实是新的），浪费了一轮完整的构建-安装-复测循环，最终靠 sing-box 日志（请求仍进 mixed 入站、被路由到远端节点）+ pub 缓存源码比对（无 `Proxy.NO_PROXY`）才定位到 lockfile。
 
-## 插件分支现状
+**规则**：
 
-- 插件独立仓库位于 `D:\FLsing\flutter_sing_box`，远端为 `https://github.com/WEP-56/flutter_sing_box.git`，当前分支为 `master`。
-- FLsing 的 `pubspec.yaml` 已改为 Git 依赖 `WEP-56/flutter_sing_box` 的 `master`；`pubspec.lock` 当前固定在远端提交 `316fdf5`。
-- FLsing 的 `.gitignore` 已排除 `/flutter_sing_box/`。插件和 FLsing 是两个独立 Git 工作区，不能在 FLsing 提交中混入插件源码。
-- 插件已删除 `ios/`、`example/ios/` 和 iOS 平台注册；默认订阅 User-Agent 收敛为 Android，移除无用的 `device_info_plus` 与 `package_info_plus` 依赖。
-- 插件结构、运行链路、包体来源和后续维护边界见 `flutter_sing_box/docs/Android-Architecture.md`。
-- 插件旧 `example` App 资产已删除，改为能力矩阵和分主题 Markdown 使用范例。
-- 插件基础验证通过：`flutter analyze --fatal-infos` 无问题，`flutter test` 6 项通过；FLsing 更新远端插件锁定后，`flutter analyze --fatal-infos` 无问题，`flutter test` 28 项通过。
-- 删除非 Android 文件不会直接缩小 APK。Android 包体主要由 `libbox.aar` 中的 ABI 原生库和启用功能决定，应优先使用 ABI 拆分或 AAB，再评估自维护 libbox 产物。
+1. `ref: master` 只在首次解析或显式 upgrade 时求值一次；此后 `flutter pub get`（本地和 CI）都按 `resolved-ref` 取代码。**改了插件，`pub get` 不会带来新代码。**
+2. 插件改动生效的完整链路：插件仓库提交并推送 master → 在 FLsing 执行 `flutter pub upgrade flutter_sing_box`（纯本地操作，非发布）→ 确认 `pubspec.lock` 的 `resolved-ref` 已指向新提交 → **提交 lockfile** → 推送触发 CI。缺任何一环，CI 包就是旧插件。
+3. 排查"修复为什么没生效"时，先查两处硬证据，再讨论其他：
+   - `grep resolved-ref pubspec.lock`，与插件 `git log` 对比；
+   - pub 缓存源码：`%LOCALAPPDATA%\Pub\Cache\git\flutter_sing_box-<resolved-ref>\`，直接看修复代码在不在。
+4. 行为特征佐证：请求类修复可用 sing-box 日志判断（例：控制器请求修复后不应再出现 `inbound/mixed` 条目）。
+5. 附带教训：一次 `pub get` 曾因中断产生坏解析，把插件的 5 个传递依赖（dio/json_annotation 等）从 lock 里丢掉——遇到 lock 异常删 `.dart_tool` 重新 `pub get`；在本机连续执行 shell 命令时工作目录会漂移（曾把插件目录的 lock 当成 FLsing 的验证），**跑 flutter 命令前显式 `Set-Location`，验证文件用绝对路径**。
 
-## 已完成设置
+## 四、运行架构速览
 
-### T0：可靠性与诊断
+- **进程模型**：主进程（Flutter UI + 插件通道）+ `:remote` 进程（VPNService + libbox 内核）。跨进程靠 AIDL + MMKV（全部 `MULTI_PROCESS_MODE`）+ libbox command 通道。
+- **配置链路**：订阅原文存 `documents/profiles/profile_N.json`（元数据在 MMKV `cs_profile`）；激活时复制为 `using_config.json` 再由 `SingBoxService._patchUsingConfig` 打补丁（本地规则集、clash_api 控制器/密钥、`default_mode` 固定 `rule`、测速链接、高级网络覆写），`Libbox.checkConfig` 校验通过后原子替换。订阅原文永不修改。
+- **订阅导入双管线**：分享链接类（vmess/vless/ss…）由 FLsing 自建解析 + 插件模板组装；sing-box JSON / Clash YAML 交给插件 `ProfileService`。两条管线都支持按订阅绑定的 User-Agent。
+- **测速两种语义**：TCP 直连测物理可达（设备直接握手节点端口）；内核测速走 `urlTest(groupTag)`（整组，结果异步进 `groupStream`）或 `urlTestOutbound`（单点，插件经认证的回环 Clash API 同步返回，**强制 `Proxy.NO_PROXY`**）。
+- **模式语义**：内核可用模式列表 = `default_mode` + 路由/DNS 规则引用过的 `clash_mode`；`cache_file`（cache.db）会持久化上次模式并在启动时优先恢复。FLsing 的策略：`default_mode` 固定写 `rule` 保证列表完整，服务 Started 后由 `AppState._applyModeToRunningService` 把用户偏好推送给内核（同时压制推送窗口内的旧模式事件）。
+- **初始化韧性**：`SingBoxService.initialize` 分核心链路（MMKV/插件通道/using_config 目录，失败抛出）与尽力而为（规则集释放、配置补丁、订阅激活，失败记 `initializationWarnings`）；`AppState.initialize` 无论服务初始化成败都加载订阅数据并订阅事件流，连接时自动重试初始化。**订阅数据"消失"几乎从来不是数据丢了**，而是初始化中断导致 UI 没加载——数据在内部存储 MMKV，无 root 文件管理器只能看到外部目录的 cache.db 和 stderr.log，这是正常的。
 
-- 设置页按类别组织，并明确设置的生效时机。
-- 断线后自动重连：区分用户主动断开、VPN 授权拒绝和内核异常，使用退避重试。
-- 日志查看、清空、复制/分享脱敏日志，以及连接诊断快照。
-- 电池优化状态与系统引导。
-- 关于页手动检查更新；没有自动检查、下载或安装。
+## 五、当前主线：下一阶段工作三项（2026-08-02 定）
 
-### T1：高频控制
+### 工作①：跟随上游更新（吸收 clash-sing/flutter_sing_box v1.1.5）
 
-- 启动后自动连接：默认关闭，只恢复用户此前保持的连接；不使用 Android 开机自启。
-- 分应用代理：关闭、仅代理、排除三种模式的 UI 与持久化已完成，支持应用搜索和系统应用隐藏；当前插件 `BoxService` 中实际调用 `includePackage/excludePackage` 的代码被注释，尚不能视为内核闭环。
-- 系统 HTTP 代理：仅在活动 TUN 配置提供本地 HTTP 代理时可用。
-- 通知栏实时速率：处理 Android 13+ 通知权限。
-- 订阅更新策略：更新间隔、仅 Wi-Fi、失败重试、最近失败原因。
-- 设置备份与恢复：不包含订阅链接、节点配置、安装包缓存和临时错误。
-- VPN bypass：**未实现且不应展示**。`flutter_sing_box` 当前 Android 实现没有启用 `allowBypass()`。
+> **进展（2026-08-02）**：插件侧同步已完成（工作区待用户提交）。逐条 triage 实录、吸收/跳过结果与端口对账结论见 `flutter_sing_box/docs/Upstream-Sync.md` 附录 A 及插件 CHANGELOG 1.1.5 条目。实测与下文预判有出入：上游第 2、6 条（端口动态适配、状态流优化）实现全在 Windows 文件中，已按分歧区跳过。剩余步骤见第六节状态表。
 
-### T2：高级网络第一阶段
+fork（`WEP-56/flutter_sing_box`）相对上游 `clash-sing/flutter_sing_box` 只有两处**有意分歧**，永不回收上游对应改动：
 
-- 独立的“高级网络”入口及 DNS、TUN 两个三级页面。
-- DNS 三档：使用订阅、FLsing 默认、手动 DoH/DoT。
-- DNS 参数：IPv4/IPv6 策略、DNS 缓存、独立缓存、FakeIP、客户端子网。
-- TUN 覆写：MTU、协议栈、自动/严格路由、嗅探、覆盖目标、IPv4/IPv6 接口地址、排除路由。
-- 默认不覆写订阅；DNS/TUN 均支持单项恢复默认。连接中保存会重载 VPN，未连接时下次连接生效。
-- 本地覆写链路：订阅原配置复制到 `using_config` 后再打补丁，不修改订阅原文。
-- 保存前通过 Android 通道调用 `Libbox.checkConfig` 校验候选配置；成功后用临时文件和备份文件替换 `using_config`。中断写入可在下次初始化恢复。
-- 高级网络设置纳入现有设置备份；旧备份缺少该字段时保持兼容。
+- **客户端支持简化**：Android-only，已删除 iOS/桌面/Web 注册与旧 example 应用；
+- **内核通信能力强化**：`checkConfig`、`urlTestOutbound`、模式校验转发等本分支自研 API。
 
-### T2：路由策略
+除这两处外，上游其余更新都要同步，**版本号也随上游同步**（此前"冻结 1.1.4"的策略作废，插件 CHANGELOG 头部的声明需一并修改）。
 
-- 新增独立“路由策略”三级页面；默认关闭覆写并完整保留订阅路由。
-- 支持默认出口、自动探测出口接口、双栈/仅 IPv4/仅 IPv6。
-- 常用规则支持私有网络直连、中国大陆规则直连和阻止 QUIC。
-- 自定义规则支持完整域名、域名后缀/关键字、IP CIDR、端口/范围、进程名、应用包名、Wi-Fi SSID、网络类型和 IP 版本。
-- 自定义规则可启停、编辑、删除和拖动排序；出口可选择订阅中的实际 outbound 或沿用默认出口。
-- 写入前校验 CIDR、端口、IP 版本、规则顺序、规则集和 outbound 引用；候选配置继续通过 `Libbox.checkConfig` 后原子替换。
-- 每次设置变更都从订阅原配置重新生成 `using_config`，避免重复保存累积本地规则。
-- 路由设置已纳入高级网络 JSON，因此随现有设置备份导出和恢复。
+[上游 v1.1.5](https://github.com/clash-sing/flutter_sing_box/releases/tag/v1.1.5) 待吸收清单：
 
-### 测速行为增强
+1. libbox `1.13.14 → 1.13.15`（sing-box 内核升级）；
+2. Clash API 端口支持动态适配变化；
+3. 移除 Android 端未使用的位置权限；
+4. 重构服务安装接口：参数收敛为 `HelperConfig` 对象，硬编码路径提取为常量；
+5. 服务管理能力（uninstall / start / stop）上升到平台抽象层与门面；
+6. 优化代理状态流控制器初始化与状态分发逻辑；
+7. `FlutterSingBoxWindows` 委托 `HelperCli`，移除已迁移的辅助方法。
 
-- 单节点直连模式继续使用节点物理地址 TCP 握手，只更新目标节点。
-- 单节点智能模式在 VPN 已连接时、内核模式在 VPN 已连接后，调用插件 `urlTestOutbound` 通过目标 outbound 完成内核测速；断开时不会伪装成代理测速。
-- 全节点测速继续遵循“智能 / 直连 / 内核”设置；内核模式仍使用整组 `urlTest(groupTag)`。
-- 已补充单元测试，覆盖单节点直连、断开提示、已连接单 outbound 内核测速与全节点策略保留。
+同步时逐条 triage，三分类处理：
 
-## 已知问题与注意事项
+- **直接吸收**：与分歧区无关的改动（如 1、2、3、6）；
+- **分歧区跳过/裁剪**：`HelperConfig` / `HelperCli` / Windows 门面等主要服务于桌面端的部分（4、5、7 大概率属此类）——纯 Windows 实现跳过，但**平台接口/门面层的通用签名变化要跟**，保持与上游接口形状兼容，降低后续同步成本；
+- **冲突区人工合并**：改动触及本分支强化过的文件（`FlutterSingBoxPlugin.kt`、方法通道、`SingBoxConnector` 等）时逐块合并，保住 NO_PROXY、模式校验、`checkConfig` 等自研能力。
 
-- 手动 DoH/DoT、三种 TUN 协议栈、三种 IP 模式、排除路由、复杂路由规则、订阅切换和连接中重载已通过真机验收；设置备份与恢复仍待验证。
-- 单 outbound 测速依赖活动配置中的认证 loopback Clash API；FLsing Network Security Config 已只为 `127.0.0.1` 放行明文 HTTP，待新包复测目标 outbound、失败结束 loading 和超时行为。
-- Android 系统 VPN 会话名和通知标题读取宿主应用标签的改动已通过真机验收，显示为 `FLsing`。
-- 连接计时器已修复取消后未清空引用的问题，避免重连后停在 `00:00:00`，待新包复测。
-- `independent_cache`、入站 `sniff` 与 `sniff_override_destination` 在更高 sing-box 版本已废弃；当前固定的 libbox 1.13.14 仍可用。升级内核时先做兼容性审查。
-- 系统 HTTP 代理依赖订阅提供的 `tun.platform.http_proxy`；外部导入配置不一定兼容。
-- 设置恢复仍复用通用配置文件选择器，原生系统选择器不会专门过滤备份 JSON。
-- 当前插件的分应用代理包名应用代码被注释；恢复后需真机分别验证“仅代理”和“排除”模式，不能只检查设置值是否写入。
-- 插件 `serviceReload` 实际触发服务重启，现有 Future 只表示命令提交，不表示新配置已成功启动；FLsing 仍依赖状态流和固定延迟收敛。
-- `onServiceAlert` 的类型和消息当前只写原生日志，Dart 只收到 stopped 状态，自动重连无法区分真实内核错误。
+集成检查点：
 
-## 内核通信增强路线
+- libbox 升级按插件 Architecture 文档的验证矩阵过一遍（启动/停止/重载/网络切换/日志流/配置校验/两种测速），并审查废弃字段（`independent_cache`、入站 `sniff` 等）；
+- "Clash API 端口动态适配"要与 FLsing 侧的端口逻辑（`_ensureClashApiPort` 分配、`_patchUsingConfig` 写入、插件 `readClashApiAccess` 从 using_config 读取）专门对账，确认两层逻辑不打架，必要时收敛为一处；
+- 同步完成后：插件 analyze/test → 提交推送 → 按第三节铁律前移 FLsing lockfile → FLsing analyze/test → CI 真机验收。
 
-### 第一阶段：配置校验闭环（已完成）
+原"内核通信第二阶段"遗留项（结构化服务告警、分应用代理 include/exclude 闭环、命令完成语义）在同步时评估：上游第 6 条可能已覆盖部分诉求，先吸收再决定自研排期。
 
-1. 在插件 `FlutterSingBox`、`FlutterSingBoxPlatform` 和 MethodChannel 实现中新增 `checkConfig(String configuration)`。
-2. Android 插件侧在后台线程调用 `Libbox.checkConfig`，为空配置和内核校验失败提供稳定错误码，不能阻塞主线程。
-3. 补充真实的 MethodChannel 单元测试，覆盖方法名、参数、成功返回和 `PlatformException`；现有插件测试仅验证默认实例，覆盖不足。
-4. FLsing 的 `PlatformConfigurationValidator` 改为调用插件 API，保持现有依赖注入和高级配置服务测试不变。
-5. 迁移验证通过后，删除 `MainActivity` 中的 `flsing/configuration` 通道、`Libbox` import，以及 `android/app/build.gradle.kts` 中仅为配置校验添加的 libbox 直接依赖。
+### 工作②：制作上游同步流程文档
 
-### 第二阶段：状态、错误与操作反馈
+> **进展（2026-08-02）**：已完成。文档位于 `flutter_sing_box/docs/Upstream-Sync.md`（随插件仓库提交），已在本文档第一节索引登记。
 
-1. 新增 `getProxyState()` 和结构化 `serviceAlertStream`；当前 `onServiceAlert` 只写原生日志并把状态改为 stopped，Dart 无法获得错误类型和消息。
-2. 恢复并验证 `BoxService` 中的 `includePackage/excludePackage` 调用，让现有分应用设置真正进入 Android `VpnService.Builder`。
-3. 为启动、停止、重载、模式切换和出口选择统一参数校验、错误码和异步执行策略；逐步替换 FLsing 的固定延迟等待。
-4. 评估整组 `urlTest` 的完成反馈。当前 Future 只表示命令已提交，实际结果依赖 `groupStream`，没有请求关联和明确超时。
-5. 核对当前 libbox command API 后，再决定是否公开日志清理、日志级别、连接明细和服务状态快照；不为内核未支持的能力设计空接口。
+产出 `flutter_sing_box/docs/Upstream-Sync.md`（建议路径），要求严谨、可被后续 agent 直接执行，至少涵盖：上游 remote 配置与 fetch 命令；按 release/commit 做差异 triage 的三分类标准（含分歧区文件清单）；合并策略选择（cherry-pick 为主还是 merge）；版本号与 CHANGELOG 同步规则；升级验证矩阵；FLsing 侧 lockfile 跟进步骤；真机验收清单。写完后在本文档第一节的索引中登记。
 
-### 第三阶段：维护与兼容协议
+### 工作③：设置项补全（Roadmap T2 剩余 → T3）
 
-1. 增加插件能力查询与 libbox 版本约束，避免 FLsing 依赖某个方法但运行时插件不支持。
-2. 为 MethodChannel/EventChannel 定义稳定的数据结构和错误模型，减少字符串方法名、动态 Map 与 JSON 字符串漂移。
-3. 把仍属于内核职责的配置、缓存和诊断桥接逐步下沉到插件，FLsing 只保留系统文件选择、安装包、分享和设备权限等应用能力。
+按 [Settings-Roadmap.md](Settings-Roadmap.md) 恢复推进：
 
-## 暂停的 T2 队列
+- T2 剩余：复杂 DNS 规则与响应规则、自动选优间隔/容差、规则集更新周期、日志级别与缓存、更新通道、内核维护；
+- T3 随后启动，按 Roadmap 的进入条件逐项立项（Root 重定向、本地代理服务模式、出站传输调优、外部控制器、原始配置编辑器等），不做大爆炸式一次性实现。原"T3 不应提前实现"的约束更新为"按进入条件立项"。
 
-1. 复杂 DNS 策略：规则分流、默认解析器、响应规则和复杂规则表单。
-2. 自动选优参数：`urltest` URL、间隔、容差与自动组默认节点。
-3. 日志级别、DNS/规则缓存控制、规则集更新周期、内核缓存维护和手动更新通道选择。
+## 六、当前状态（2026-08-02）
 
-## 两仓提交顺序
+| 事项 | 状态 |
+| --- | --- |
+| 三问题修复（初始化韧性 / 单点测速 502 / 模式切换与跳回） | **已真机验收通过**（FLsing `c2ed39b`+`29c74a1`，插件 `df98246`） |
+| 订阅自定义 User-Agent | **已真机验收通过**（`a6577f2`，预设 8 条 + 自定义，按订阅绑定） |
+| pubspec.lock 前移至插件 `df98246` | 已提交（`c7c5229`） |
+| 日志脱敏正则修复 | 已提交 |
+| 设置备份与恢复 | 尚未真机验收 |
+| 分应用代理 | UI 与持久化完成；插件 `BoxService` 的 include/exclude 调用仍被注释，未形成内核闭环（工作①同步时评估：上游 v1.1.5 未涉及此块，仍待自研排期） |
+| 上游 v1.1.5 同步（工作①） | **插件侧代码与文档已完成，工作区待提交**。剩余：用户 review 后在插件仓库 commit + push master → FLsing `flutter pub upgrade flutter_sing_box` 前移 lockfile（与 `test/app_state_latency_test.dart` 存储接口适配放同一提交）→ push 触发 CI → 真机按 Upstream-Sync.md §9 验证矩阵过一遍 |
+| 上游同步流程文档（工作②） | 已完成：`flutter_sing_box/docs/Upstream-Sync.md`（含 v1.1.5 同步实录附录） |
 
-1. 在 `flutter_sing_box` 仓库完成改动、基础测试、提交并推送 `master`。
-2. 在 FLsing 执行 `flutter pub get`，确认 `pubspec.lock` 的 `resolved-ref` 更新到插件新提交。
-3. 再提交 FLsing 的依赖迁移和应用层桥接删除；插件提交未推送前，不要把本地插件能力当作远端依赖已可用。
+测试基线（2026-08-02 同步后）：FLsing `flutter analyze` 0 问题、37 项测试全过（advanced 13 + latency/mode/init 8 + UA 5 + widget 3 + app_update_service 8），并已用 path 覆写对 1.1.5 插件预验证 analyze/test 全绿；恢复锁定后工作区暂有 2 条 `override_on_non_overriding_member` 告警（`_MemoryStorage` 的 getDouble/setDouble 对旧锁定插件不成立），lockfile 前移后消除。插件 `flutter analyze --fatal-infos` 0 问题、Dart 测试 8 项全过（原 6 + WindowsServiceStatus 2），Kotlin 单测 7 项需 gradle 宿主环境（本机未运行，依赖 CI/AS）。
 
-## 设置实现约束
+## 七、经验教训清单
 
-- 每项设置必须明确“立即生效 / 重载 VPN / 下次连接 / 重启应用”中的一种，不能只写入而不生效。
-- 高风险覆写先生成候选配置并校验；失败不能替换当前可用 `using_config`。
-- 高级能力应放在二级或三级页面，默认保持订阅配置；不要为简化 UI 删除已有能力。
-- 不实现多语言应用 UI；当前设置文案维持中文。
-- 不实现自动更新检查、下载或安装；更新只能由用户从“设置 → 关于 → 版本”手动发起。
+1. **git 依赖锁定**：见第三节铁律，这是本项目最容易反复踩的坑。
+2. **空响应体的 502 = 中间代理特征**：sing-box Clash API 自身报错必带 JSON body。`platform.http_proxy` 开启时 Android 向所有应用下发系统代理且不排除 localhost，`HttpURLConnection` 默认走 ProxySelector——**进程内访问回环服务必须 `openConnection(Proxy.NO_PROXY)`**。此前还有一层：Android 默认禁明文 HTTP，Network Security Config 已单独放行 `127.0.0.1`。
+3. **模式列表不是三件套常量**：只有被 `default_mode` 或规则引用的模式才可切换；libbox 对未知模式静默忽略，插件层必须先行校验（现为大小写不敏感）。`cache_file` 会把旧模式带回来，宿主要在 Started 后主动推送偏好。
+4. **sing-box 规则多字段是 AND**：曾有 `{"clash_mode":"direct","ip_is_private":true,"domain_suffix":[".cn"]}` 导致直连模式几乎匹配不到任何流量。一条规则一件事。
+5. **模板改动不会自动生效于已有订阅**：模板在导入/刷新时固化进订阅配置，改模板后需让用户"更新订阅"一次。
+6. **Dart raw string 正则**：`r'[^\\s]'` 是"非反斜杠非 s"而不是"非空白"，曾导致日志脱敏在 `proxies` 的 `s` 处截断输出 `<url>s/`。raw string 里写 `\S` / `\s` 单反斜杠。
+7. **真机日志噪音**：`E/MESA: Failed to find VkFence` 是 Impeller Vulkan 与 Mesa/Turnip 驱动的渲染层噪音，与业务无关，`adb logcat | findstr /v MESA` 过滤；FLsing 业务错误走应用内 snackbar 与"诊断→日志"，不依赖 logcat。
+8. **MMKV 多进程**：Dart/Kotlin 两侧同 ID 必须同为 `MULTI_PROCESS_MODE`；mmkv 版本两侧保持一致（当前 2.4.0，同一 Maven 坐标只打包一份原生库）。
+
+## 八、验证与协作边界
+
+- Agent 执行：`flutter analyze`、`flutter test`（两仓）、格式化、差异检查、文档。插件 Kotlin 单测无法本机运行时须如实说明。
+- 用户执行：APK 构建（GitHub Actions `release.yml`）、真机安装、VPN/真实网络/订阅兼容验收。agent 提供简短可操作的复测清单，不代替执行。
+- 提交与推送由用户决定；agent 不主动 commit/push。
+- 真机待验清单：设置备份与恢复；上游 v1.1.5 同步落地后按验证矩阵完整过一遍（启动/停止/重载/网络切换/两种测速/日志流/配置校验/分应用代理评估结果）。
+
+## 九、实现约束
+
+- 每项设置必须明确生效时机（立即 / 重载 VPN / 下次连接 / 重启应用）之一，不能只写入不生效。
+- 高风险覆写先生成候选配置过 `Libbox.checkConfig`，失败不得替换当前可用 `using_config`。
+- 默认保持订阅配置，不为简化 UI 删已有能力；高级能力放二级/三级页。
+- 不做多语言（文案中文）；不做自动更新检查/下载/安装（仅"设置→关于→版本"手动）；VPN bypass 不做（插件未启用 `allowBypass()`）。
+- 修 bug 优先查 FLsing 本体，再查插件；插件 API 变更需同步更新 `example/guides` 与 CHANGELOG。
+- 升级 libbox 前审查废弃字段（`independent_cache`、入站 `sniff` 等在更高版本已废弃，1.13.14 仍可用）。
+
+## 十、关键文件地图
+
+| 位置 | 职责 |
+| --- | --- |
+| `lib/providers/app_state.dart` | 全局状态：连接相位、模式推送与事件抑制、测速调度、订阅操作、重连、日志脱敏 |
+| `lib/data/services/sing_box_service.dart` | 服务门面：分级初始化、订阅双管线导入/刷新、using_config 补丁与原子替换、UA 绑定落点 |
+| `lib/data/services/app_settings.dart` | 应用设置（MMKV `flsing_app`）：模式偏好、测速、Clash API 端口/密钥、UA 列表与绑定 |
+| `lib/data/services/advanced_network_config_service.dart` | DNS/TUN/路由覆写补丁与校验 |
+| `lib/models/user_agents.dart` | UA 预设与校验 |
+| `lib/ui/pages/settings_page.dart` | 设置全部页面（含 UA 列表管理页、日志页） |
+| `lib/ui/pages/subscription_sheet.dart` | 订阅管理与添加/编辑表单（UA 下拉绑定） |
+| `flutter_sing_box/lib/src/core/services/profile_service.dart` | 插件侧订阅导入（支持 `userAgent`） |
+| `flutter_sing_box/android/.../FlutterSingBoxPlugin.kt` | 方法通道：启停、模式校验转发、`urlTestOutbound`（NO_PROXY）、`checkConfig` |
+| `flutter_sing_box/assets/configs/singbox_config_template.json` | 订阅组装模板（clash_mode / ip_is_private / cache_file / mixed 入站） |
+| `test/`（两仓） | 回归测试；改行为先看有无对应测试要同步 |
